@@ -76,7 +76,13 @@ class CatalogTests(TestCase):
         self.assertTrue(SourceText.objects.filter(text="Explains anything, slowly.",
                                                   active=True).exists())
         self.assertFalse(SourceText.objects.get(
-            text="Explains any topic simply, step by step.").active)
+            text="Explains any topic step by step, at your level.").active)
+
+    def test_categories_and_starters_are_recorded(self):
+        texts = dict(SourceText.objects.filter(location__startswith=i18n.CATALOG)
+                     .values_list("text", "location"))
+        self.assertEqual(texts["Law"], "catalog:category:law")
+        self.assertEqual(texts["Explain photosynthesis simply"], "catalog:agent:tutor")
 
     def test_users_read_them_in_their_language(self):
         source = SourceText.objects.get(text="Translator")
@@ -104,7 +110,8 @@ class DoctorTests(TestCase):
         self.assertEqual(labels["Chat"].detail,
                          "GPT-6 Luna (default), GPT-6.1 Sol, GPT-6 Astra, Claude Haiku 5.5, "
                          "Claude Sonnet 5.5")
-        self.assertEqual(labels["Assistants"].detail, "8 on offer")
+        self.assertEqual(labels["Agents"].detail, "39 on offer in 10 categories")
+        self.assertNotIn("Agents without a category", labels)
         self.assertEqual(labels["Archive channel"].status, diagnostics.WARN)
 
     def test_live_without_a_key_nothing_shows(self):
@@ -124,6 +131,11 @@ class DoctorTests(TestCase):
 
     def test_nobody_can_use_them_without_a_tester(self):
         self.assertEqual(self.labels()["Using the tools"].status, diagnostics.WARN)
+
+    def test_an_agent_in_no_category(self):
+        Assistant.objects.filter(slug="tutor").update(category=None)
+        self.assertIn("1 agent(s) on offer are in no category",
+                      self.labels()["Agents without a category"].detail)
 
     def test_an_offered_model_the_provider_does_not_list(self):
         AIModel.objects.filter(model_id="gpt-6-astra").update(listed=False)

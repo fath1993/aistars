@@ -1,9 +1,9 @@
 """
 Texts users read that live in the database rather than the code: the models'
-taglines and the assistants' names, lines and first messages. They are
-recorded with the bot's texts (location "catalog:…") whenever one changes,
-so the AI translates them into every language with Translate on, and tr()
-shows them in the user's language.
+taglines, the categories' names, and the agents' names, lines, first messages
+and starters. They are recorded with the bot's texts (location "catalog:…")
+whenever one changes, so the AI translates them into every language with
+Translate on, and tr() shows them in the user's language.
 """
 
 import logging
@@ -22,15 +22,19 @@ def texts() -> dict:
     """text -> location, for every database text users can see."""
     from apps.ai.models import AIModel
 
-    from .models import Assistant
+    from .models import Assistant, Category
 
     found = {}
     for model in AIModel.objects.filter(offered=True).exclude(tagline=""):
         found.setdefault(model.tagline, f"{i18n.CATALOG}model:{model.model_id}")
+    for category in Category.objects.filter(active=True):
+        found.setdefault(category.name, f"{i18n.CATALOG}category:{category.slug}")
     for assistant in Assistant.objects.filter(active=True):
-        for text in (assistant.name, assistant.description, assistant.first_message):
+        texts = [assistant.name, assistant.description, assistant.first_message,
+                 *(assistant.starters or [])]
+        for text in texts:
             if text:
-                found.setdefault(text, f"{i18n.CATALOG}assistant:{assistant.slug}")
+                found.setdefault(text, f"{i18n.CATALOG}agent:{assistant.slug}")
     return found
 
 

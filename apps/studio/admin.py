@@ -1,15 +1,75 @@
 from django.contrib import admin, messages
+from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Sum
+from django.db.models.functions import Coalesce
 
 from . import jobs
-from .models import ACTIVE, Assistant, Conversation, Job, Message
+from .models import ACTIVE, Assistant, Category, Conversation, Job, Message, Status
+
+
+@admin.register(Category)
+class CategoryAdmin(admin.ModelAdmin):
+    """The shelves of the agent catalog. Names are translated like the bot's texts."""
+
+    list_display = ("__str__", "slug", "agents_on_offer", "active", "sort_order")
+    list_editable = ("active", "sort_order")
+    prepopulated_fields = {"slug": ("name",)}
+    actions = ("draft_agents",)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(
+            on_offer=Count("agents", filter=Q(agents__active=True)))
+
+    @admin.display(description="agents on offer", ordering="on_offer")
+    def agents_on_offer(self, obj):
+        return obj.on_offer
+
+    @admin.action(description="Draft 3 new agents with AI (switched off, for you to review)")
+    def draft_agents(self, request, queryset):
+        from . import tasks
+
+        for category in queryset:
+            tasks.draft_agents.delay(category.pk)
+        self.message_user(
+            request, f"Drafting agents for {queryset.count()} categor(y/ies). They appear under "
+            "Agents, switched off, in a minute; check and switch on the good ones. A failure "
+            "is in the activity log.", messages.SUCCESS)
 
 
 @admin.register(Assistant)
 class AssistantAdmin(admin.ModelAdmin):
-    list_display = ("__str__", "slug", "description", "model", "active", "sort_order")
-    list_editable = ("active", "sort_order")
-    list_filter = ("active",)
+    """
+    An agent: its instructions (in English: the AI answers in the user's
+    language), what users read on its card, and how much it is used.
+    """
+
+    list_display = ("__str__", "slug", "category", "model", "featured", "chats", "credits",
+                    "active", "sort_order")
+    list_editable = ("featured", "active", "sort_order")
+    list_filter = ("active", "featured", "category")
+    search_fields = ("slug", "name", "description", "tags")
+    list_select_related = ("category", "model")
     prepopulated_fields = {"slug": ("name",)}
+    fieldsets = (
+        (None, {"fields": ("name", "slug", "emoji", "category", "active", "featured",
+                           "sort_order")}),
+        ("What users read", {"fields": ("description", "first_message", "starters", "tags")}),
+        ("What the AI is told", {"fields": ("instructions", "model")}),
+    )
+
+    def get_queryset(self, request):
+        charged = Job.objects.filter(assistant=OuterRef("pk"), status=Status.DONE).order_by() \
+            .values("assistant").annotate(total=Sum("charged")).values("total")
+        return super().get_queryset(request).annotate(
+            chat_count=Count("conversations", distinct=True),
+            credit_total=Coalesce(Subquery(charged, output_field=IntegerField()), 0))
+
+    @admin.display(description="chats", ordering="chat_count")
+    def chats(self, obj):
+        return obj.chat_count
+
+    @admin.display(description="credits charged", ordering="credit_total")
+    def credits(self, obj):
+        return obj.credit_total
 
 
 class MessageInline(admin.TabularInline):

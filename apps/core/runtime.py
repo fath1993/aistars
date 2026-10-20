@@ -98,6 +98,17 @@ REGISTRY = (
     Spec("JOBS_PER_USER", "studio", "Requests at once per user", kind="int", default=2,
          help="Chat answers, images and voice notes being made at the same time for one "
               "user. One chat answer at a time per chat whatever this says."),
+    Spec("CONFIRM_ABOVE_CREDITS", "studio", "Ask before sending above (credits)", kind="int",
+         default=20,
+         help="A chat message whose answer can cost more than this (a big file, an "
+              "expensive model) is sent only after the user confirms it. 0: never ask."),
+    Spec("LOW_BALANCE_CREDITS", "studio", "Low balance warning (credits)", kind="int",
+         default=20,
+         help="Below this, answers and results say the balance is low, with a Buy credits "
+              "button. 0: never."),
+    Spec("FIND_PER_DAY", "studio", "Find for me, per user a day", kind="int", default=20,
+         help="How many times a day a user may ask the AI to find the right agents. Free "
+              "for users; each counts against the AI spending limits."),
 
     # ---- Safety ----------------------------------------------------------
     Spec("SAFETY_STRIKE_LIMIT", "safety", "Strikes before blocking", kind="int", default=3,
@@ -147,6 +158,9 @@ RANGES = {
     "CHAT_CONTEXT_MESSAGES": (0, 100),
     "CHAT_MAX_MESSAGE_CHARS": (100, 100_000),
     "JOBS_PER_USER": (1, 10),
+    "CONFIRM_ABOVE_CREDITS": (0, 100_000),
+    "LOW_BALANCE_CREDITS": (0, 100_000),
+    "FIND_PER_DAY": (0, 1000),
 }
 
 

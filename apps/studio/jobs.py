@@ -43,6 +43,25 @@ class TooMany(Exception):
     """The user already has as many requests being made as allowed."""
 
 
+class LimitReached(Exception):
+    """The request would take the user past the daily limit they set themselves."""
+
+    def __init__(self, limit, spent, hold):
+        super().__init__(f"limit {limit}, spent {spent}, needs {hold}")
+        self.limit, self.spent, self.hold = limit, spent, hold
+
+
+def spent_today(account) -> int:
+    """Credits charged today, plus what is held for requests being made."""
+    from django.db.models import Sum
+
+    start = timezone.localtime().replace(hour=0, minute=0, second=0, microsecond=0)
+    charged = Job.objects.filter(account=account, status=Status.DONE,
+                                 created_at__gte=start).aggregate(total=Sum("charged"))
+    held = Job.objects.filter(account=account, status__in=ACTIVE).aggregate(total=Sum("hold"))
+    return (charged["total"] or 0) + (held["total"] or 0)
+
+
 def demo() -> bool:
     return ControlPanel.get().demo_mode
 
@@ -67,9 +86,9 @@ def hold_for(estimate_micros, model) -> int:
 
 def start(account, chat_id, kind, model, estimate_micros, **fields) -> Job:
     """
-    Hold the most the request can cost and record it, or raise NotEnough or
-    TooMany. The caller queues it with launch() once it has done its part
-    (the message the answer goes into).
+    Hold the most the request can cost and record it, or raise NotEnough,
+    TooMany or LimitReached. The caller queues it with launch() once it has
+    done its part (the message the answer goes into).
     """
     if busy(account) >= int(runtime.get("JOBS_PER_USER")):
         raise TooMany()
@@ -77,6 +96,16 @@ def start(account, chat_id, kind, model, estimate_micros, **fields) -> Job:
     balance = ledger.balance(account)
     if hold > balance:
         raise NotEnough(hold, balance)
+    from .chat import profile
+
+    limit = profile(account).daily_limit
+    if limit:
+        spent = spent_today(account)
+        if spent + hold > limit:
+            raise LimitReached(limit, spent, hold)
+    conversation = fields.get("conversation")
+    if conversation is not None and "assistant" not in fields:
+        fields["assistant_id"] = conversation.assistant_id
     try:
         with transaction.atomic():
             job = Job.objects.create(account=account, kind=kind, model=model, chat_id=chat_id,
@@ -127,17 +156,22 @@ def charge_preview(job, cost_micros) -> tuple:
     return credits, ledger.balance(job.account) + job.hold - credits
 
 
-def done(job, cost_micros) -> int:
-    """Charge what it really cost (never more than the hold); the new balance."""
+def done(job, cost_micros, tokens_in=0, tokens_out=0) -> int:
+    """
+    Charge what it really cost (never more than the hold), with the tokens
+    the provider reported; the new balance.
+    """
     credits = min(pricing.credits_for_micros(cost_micros, job.model), job.hold)
     with transaction.atomic():
         updated = Job.objects.filter(pk=job.pk, status=Status.RUNNING).update(
             status=Status.DONE, cost_micros=cost_micros, charged=credits,
+            input_tokens=tokens_in, output_tokens=tokens_out,
             finished_at=timezone.now(), updated_at=timezone.now())
         if updated:
             services.charge(job, credits)
     if updated:
         job.status, job.cost_micros, job.charged = Status.DONE, cost_micros, credits
+        job.input_tokens, job.output_tokens = tokens_in, tokens_out
         activity.info(LogCategory.STUDIO, f"{job.kind}_done",
                       f"#{job.pk} {job.account}: 🪙 {credits} of 🪙 {job.hold} held "
                       f"(${cost_micros / 1e6:.4f})", account=job.account,

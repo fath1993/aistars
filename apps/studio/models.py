@@ -11,10 +11,34 @@ remembers a conversation; users can delete a chat.
 from django.db import models
 
 
-class Assistant(models.Model):
-    """A ready-made helper: a chat that starts with its own instructions."""
+class Category(models.Model):
+    """A shelf of the agent catalog: Law, Learning, Code & tech…"""
 
     slug = models.SlugField(max_length=40, unique=True)
+    emoji = models.CharField(max_length=8, blank=True)
+    name = models.CharField(max_length=40, help_text="Translated like the bot's texts.")
+    active = models.BooleanField(default=True)
+    sort_order = models.PositiveSmallIntegerField(default=100)
+
+    class Meta:
+        ordering = ("sort_order", "name")
+        verbose_name_plural = "categories"
+
+    def __str__(self):
+        return f"{self.emoji} {self.name}".strip()
+
+
+class Assistant(models.Model):
+    """
+    An agent of the catalog: a chat that starts with its own instructions (a
+    lawyer, a teacher, a programmer…). Users browse them by category, search
+    them, or let the AI find one, and start a chat from the agent's card.
+    """
+
+    slug = models.SlugField(max_length=40, unique=True,
+                            help_text="In its share link: t.me/<bot>?start=agent_<slug>.")
+    category = models.ForeignKey(Category, null=True, blank=True, on_delete=models.SET_NULL,
+                                 related_name="agents")
     emoji = models.CharField(max_length=8, blank=True)
     name = models.CharField(max_length=60, help_text="Translated like the bot's texts.")
     description = models.CharField(
@@ -26,15 +50,26 @@ class Assistant(models.Model):
     instructions = models.TextField(
         help_text="Told to the AI before every message of the chat (in English; it answers "
                   "in the user's language).")
+    starters = models.JSONField(
+        default=list, blank=True,
+        help_text="Up to three questions users can tap to begin, as a JSON list of texts. "
+                  "Translated like the bot's texts.")
+    tags = models.CharField(
+        max_length=300, blank=True,
+        help_text="Words people may search with, comma-separated, in English (the name and "
+                  "line are searched in the user's language too).")
     model = models.ForeignKey(
         "ai.AIModel", null=True, blank=True, on_delete=models.SET_NULL,
         limit_choices_to={"use": "chat"},
         help_text="Empty: the model the user chose for their chats.")
+    featured = models.BooleanField(default=False,
+                                   help_text="Offered first when a user starts a new chat.")
     active = models.BooleanField(default=True)
     sort_order = models.PositiveSmallIntegerField(default=100)
 
     class Meta:
         ordering = ("sort_order", "name")
+        verbose_name = "agent"
 
     def __str__(self):
         return f"{self.emoji} {self.name}".strip()
@@ -50,6 +85,10 @@ class Profile(models.Model):
     image_model = models.ForeignKey("ai.AIModel", null=True, blank=True,
                                     on_delete=models.SET_NULL, related_name="+")
     voice = models.CharField(max_length=24, blank=True)
+    saved = models.ManyToManyField(Assistant, blank=True, related_name="+",
+                                   help_text="⭐ My agents.")
+    daily_limit = models.PositiveIntegerField(
+        null=True, blank=True, help_text="The most credits a day the user allows themselves.")
 
     def __str__(self):
         return f"{self.account}"
@@ -135,6 +174,9 @@ class Job(models.Model):
     model = models.ForeignKey("ai.AIModel", on_delete=models.PROTECT, related_name="jobs")
     conversation = models.ForeignKey(Conversation, null=True, blank=True,
                                      on_delete=models.SET_NULL, related_name="jobs")
+    # The chat's agent, kept when the chat is deleted (usage by agent).
+    assistant = models.ForeignKey(Assistant, null=True, blank=True, on_delete=models.SET_NULL,
+                                  related_name="jobs")
     # Chat: the message answered. Image: the description. Speech: the text.
     prompt = models.TextField(blank=True)
     # Telegram file_ids sent in: photos, or the voice note.
@@ -146,6 +188,10 @@ class Job(models.Model):
     demo = models.BooleanField(default=False, help_text="Made in Demo mode: no provider.")
 
     estimate_micros = models.BigIntegerField(default=0, help_text="The most it can cost you.")
+    # What the provider reported: text and file tokens read, tokens written
+    # (images: image tokens made).
+    input_tokens = models.PositiveIntegerField(default=0)
+    output_tokens = models.PositiveIntegerField(default=0)
     cost_micros = models.BigIntegerField(default=0, help_text="What it cost you.")
     hold = models.PositiveIntegerField(default=0, help_text="Credits held when it started.")
     charged = models.PositiveIntegerField(default=0, help_text="Credits it was charged.")

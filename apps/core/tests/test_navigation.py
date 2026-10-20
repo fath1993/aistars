@@ -31,7 +31,7 @@ BASE_URL = "https://ais.example.com"
 
 def last_row(payload):
     rows = json.loads(payload["reply_markup"])["inline_keyboard"]
-    return [button["callback_data"] for button in rows[-1]]
+    return [button.get("callback_data") for button in rows[-1]]
 
 
 class NavigationTestCase(TestCase):
@@ -61,8 +61,8 @@ class ScreenTests(NavigationTestCase):
     def test_home_has_neither(self):
         callbacks = keyboard_callbacks(self.sent()[-1])
         self.assertNotIn("menu:home", callbacks)
-        self.assertEqual(callbacks, ["chat:", "img:", "voice:", "asst:", "credits:",
-                                     "menu:help", "menu:profile"])
+        self.assertEqual(callbacks, ["chat:new", "ag:", "img:", "voice:", "credits:", "use:",
+                                     "menu:profile", "menu:help"])
 
     def test_every_other_screen_ends_with_back_and_menu(self):
         back_to = {
@@ -80,7 +80,17 @@ class ScreenTests(NavigationTestCase):
             "img:create": "menu:home",
             "voice:": "menu:home",
             "voice:voices": "voice:",
-            "asst:": "menu:home",
+            "chat:new": "menu:home",
+            "ag:": "menu:home",
+            "ag:cat:law": "ag:",
+            "ag:card:lawyer": "ag:back",
+            "ag:search": "ag:",
+            "ag:find": "ag:",
+            "ag:saved": "ag:",
+            "ag:top": "ag:",
+            "use:": "menu:home",
+            "use:last:0": "use:",
+            "use:limit": "use:",
         }
         for data, target in back_to.items():
             edit = self.tap(data)
@@ -93,7 +103,7 @@ class ScreenTests(NavigationTestCase):
     def test_menu_ends_a_credit_request(self):
         self.tap("credits:request")
         self.tap("menu:home")
-        self.assertIn("Just type a message", self.tg.last("editMessageText")["text"])
+        self.assertIn("Just type to chat", self.tg.last("editMessageText")["text"])
         post_update(message_update("500"))
         self.assertFalse(CreditRequest.objects.exists())
         # Typed text is a chat message now: here, too few credits to answer it.
@@ -115,7 +125,7 @@ class NoticeTests(NavigationTestCase):
                    if name in ("editMessageText", "deleteMessage")]
         self.assertNotIn(notice, touched)
         self.assertEqual(touched, [self.home])   # the old panel goes
-        self.assertIn("Just type a message", self.sent()[-1]["text"])
+        self.assertIn("Just type to chat", self.sent()[-1]["text"])
         self.assertNotIn(self.panel(), (notice, self.home))
 
 

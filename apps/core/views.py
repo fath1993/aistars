@@ -2,6 +2,7 @@ import hmac
 import json
 import logging
 
+from django.core.cache import cache
 from django.http import HttpResponse, HttpResponseForbidden
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -159,6 +160,9 @@ def _route_message(account, message):
         telegram.send_message(chat_id, menus.blocked_text())
         return
     if gate == "register":
+        if _command(text) == "start" and _payload(text):
+            # A shared link: opened once the user has registered.
+            cache.set(_start_key(account), _payload(text), 60 * 60 * 24)
         telegram.send_message(chat_id, menus.register_text(),
                               reply_markup=menus.register_keyboard())
         return
@@ -171,6 +175,9 @@ def _route_message(account, message):
         # A command ends any question asked.
         billing_bot.cancel_input(account)
         studio_bot.stop_waiting(account)
+    if command == "start" and _payload(text) and studio_bot.open_start(
+            account, chat_id, _payload(text)):
+        return
     if command in ("start", "menu"):
         ui.fresh_screen(account, chat_id, menus.home_text(account),
                         menus.home_keyboard(account))
@@ -229,6 +236,10 @@ def _register(account, message):
     with languages.activate_for(account):
         telegram.send_message(chat_id, menus.registered_text(),
                               reply_markup=menus.remove_keyboard())
+        payload = cache.get(_start_key(account))
+        cache.delete(_start_key(account))
+        if payload and studio_bot.open_start(account, chat_id, payload):
+            return
         ui.fresh_screen(account, chat_id, menus.home_text(account),
                         menus.home_keyboard(account))
 
@@ -238,6 +249,16 @@ def _command(text: str) -> str:
     if not text.startswith("/"):
         return ""
     return text.split()[0].lower().lstrip("/").split("@")[0]
+
+
+def _payload(text: str) -> str:
+    """'/start agent_lawyer' -> 'agent_lawyer' (what a t.me/<bot>?start= link carries)."""
+    parts = text.split(maxsplit=1)
+    return parts[1].strip()[:64] if len(parts) > 1 else ""
+
+
+def _start_key(account):
+    return f"start:payload:{account.pk}"
 
 
 # --------------------------------------------------------------------------
@@ -295,7 +316,7 @@ def _route_callback(account, callback_query):
         billing_bot.handle_callback(account, chat_id, argument)
         telegram.answer_callback_query(callback_id)
         return
-    answer = studio_bot.handle_callback(account, chat_id, verb, argument)
+    answer = studio_bot.handle_callback(account, chat_id, verb, argument, message_id)
     if answer is not None:
         telegram.answer_callback_query(callback_id, answer)
         return

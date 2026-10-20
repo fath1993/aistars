@@ -73,7 +73,7 @@ class CreateTests(StudioTestCase):
         self.assertIn(f"🎨 #{job.pk}", photo["caption"])
         self.assertIn("🪙 5 · Balance 🪙 495", photo["caption"])
         self.assertEqual(self.buttons(photo), [f"out:again:{job.pk}", f"out:edit:{job.pk}",
-                                               "menu:new"])
+                                               f"out:cost:{job.pk}", "menu:new"])
         self.assertTrue(job.result_file_id)
 
     def test_the_panel_says_it_is_being_made(self):

@@ -33,9 +33,10 @@ class StudioConfig(AppConfig):
     def ready(self):
         from apps.ai.models import AIModel
 
-        from .models import Assistant
+        from .models import Assistant, Category
 
         post_migrate.connect(_record_texts, sender=self)
-        # A tagline or an assistant edited in the admin reaches the translator.
+        # A tagline, a category or an agent edited in the admin reaches the translator.
         post_save.connect(_text_changed, sender=Assistant)
+        post_save.connect(_text_changed, sender=Category)
         post_save.connect(_text_changed, sender=AIModel)

@@ -77,7 +77,7 @@ class StartTests(TestCase):
         self.assertEqual(self.tg.methods(), ["sendMessage"])
         sent = self.tg.last("sendMessage")
         self.assertEqual(sent["text"], menus.home_text())
-        self.assertEqual(keyboard_callbacks(sent), ["credits:", "menu:help", "menu:profile"])
+        self.assertEqual(keyboard_callbacks(sent), ["credits:", "menu:profile", "menu:help"])
         account = Account.objects.get(telegram_user_id=42)
         self.assertIsNotNone(account.ui_message_id)
 

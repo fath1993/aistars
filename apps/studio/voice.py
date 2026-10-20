@@ -104,6 +104,10 @@ def start_transcription(account, chat_id, audio, then_chat=False, attachments=()
     except jobs.NotEnough as exc:
         return telegram.send_message(chat_id, texts.not_enough_text(exc.hold, exc.balance),
                                      reply_markup=texts.not_enough_keyboard(chat=then_chat))
+    except jobs.LimitReached as exc:
+        from .chat import limit_notice
+
+        return limit_notice(chat_id, exc)
     except jobs.TooMany:
         return _notice(chat_id, texts.too_many_text())
     state.stop(account)
@@ -137,8 +141,9 @@ def transcribe(job):
     then_chat = job.options.get("then_chat")
     shown = texts.transcript_text(text, then_chat) if text else telegram.esc(
         texts.nothing_heard_text())
+    low = texts.low_balance(balance)
     if then_chat:
-        _write(job, shown, texts.footer(job.charged, balance))
+        _write(job, shown, texts.footer(job.charged, balance), texts.result_keyboard(job, low))
         if text:
             from . import chat
 
@@ -147,15 +152,15 @@ def transcribe(job):
                       attachments=job.options.get("attachments") or [])
         return
     if not text:
-        _write(job, shown, texts.footer(job.charged, balance), texts.notice_keyboard())
+        _write(job, shown, texts.footer(job.charged, balance), texts.result_keyboard(job, low))
         return
     parts = formatting.split_plain(text)
     last = len(parts) - 1
     for number, part in enumerate(parts):
         body = ("📝 " if number == 0 else "") + telegram.esc(part)
         if number == last:
-            _write(job, body, texts.footer(job.charged, balance), texts.notice_keyboard(),
-                   first=number == 0)
+            _write(job, body, texts.footer(job.charged, balance),
+                   texts.result_keyboard(job, low), first=number == 0)
         else:
             _write(job, body, "", None, first=number == 0)
 
@@ -232,6 +237,10 @@ def start_speech(account, chat_id, text, screen_check=True):
         telegram.send_message(chat_id, texts.not_enough_text(exc.hold, exc.balance),
                               reply_markup=texts.not_enough_keyboard(chat=False))
         return None
+    except jobs.LimitReached as exc:
+        from .chat import limit_notice
+
+        return limit_notice(chat_id, exc)
     except jobs.TooMany:
         return _notice(chat_id, texts.too_many_text())
     jobs.launch(job)
@@ -246,13 +255,14 @@ def speak(job):
         data, cost = clients.speak(job.model, job.prompt, voice)
     job.charged, balance = jobs.charge_preview(job, cost)
     caption = texts.speech_caption(job, balance)
+    markup = texts.result_keyboard(job, texts.low_balance(balance))
     stored = archive.store_output(job, "voice", data, f"speech-{job.pk}.ogg", "audio/ogg")
     sent = None
     if stored:
         sent = telegram.send_media(job.chat_id, "voice", telegram.file_id_of(stored, "voice"),
-                                   caption, texts.notice_keyboard())
+                                   caption, markup)
     if sent is None:
-        sent = telegram.send_media(job.chat_id, "voice", data, caption, texts.notice_keyboard(),
+        sent = telegram.send_media(job.chat_id, "voice", data, caption, markup,
                                    filename=f"speech-{job.pk}.ogg", content_type="audio/ogg")
     if sent is None:
         raise clients.AIError("Telegram took the voice note nowhere")

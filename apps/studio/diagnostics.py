@@ -9,7 +9,7 @@ from apps.core import runtime
 from apps.core.diagnostics import OK, WARN
 from apps.core.models import Account, ControlPanel
 
-from .models import ACTIVE, Assistant, Job
+from .models import ACTIVE, Assistant, Category, Job
 
 FIX = ("AI → Providers → OpenAI: paste the API key. Then AI → Models: offer a model of this "
        "use, with its prices.")
@@ -45,8 +45,16 @@ def check(report, section):
                    section)
 
     assistants = Assistant.objects.filter(active=True).count()
-    report.add(OK if assistants else WARN, "Assistants", f"{assistants} on offer",
-               "" if assistants else "AI tools → Assistants: switch one on.", section)
+    categories = Category.objects.filter(active=True).count()
+    report.add(OK if assistants else WARN, "Agents",
+               f"{assistants} on offer in {categories} categories",
+               "" if assistants else "AI tools → Agents: switch one on.", section)
+    homeless = Assistant.objects.filter(active=True).exclude(category__active=True).count()
+    if homeless:
+        report.add(WARN, "Agents without a category",
+                   f"{homeless} agent(s) on offer are in no category users can open: they "
+                   "show in search and links only", "AI tools → Agents: give them a category.",
+                   section)
 
     archive = runtime.get("ARCHIVE_CHAT_ID")
     if archive:

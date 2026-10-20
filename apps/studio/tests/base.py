@@ -260,6 +260,11 @@ class StudioTestCase(TestCase):
         payload = payload or self.last_payload()
         return keyboard_callbacks(payload) if payload and payload.get("reply_markup") else []
 
+    def button_texts(self, payload=None):
+        payload = payload or self.last_payload()
+        markup = json.loads(payload["reply_markup"])
+        return [button["text"] for row in markup["inline_keyboard"] for button in row]
+
     def balance(self):
         return ledger.balance(self.account)
 

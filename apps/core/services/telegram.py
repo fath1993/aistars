@@ -161,8 +161,15 @@ def delete_message(chat_id, message_id):
     return _call("deleteMessage", chat_id=chat_id, message_id=message_id)
 
 
+class Alert(str):
+    """A button's answer shown as a box the user closes, not a passing toast."""
+
+
 def answer_callback_query(callback_query_id, text=""):
-    return _call("answerCallbackQuery", callback_query_id=callback_query_id, text=text)
+    payload = {"callback_query_id": callback_query_id, "text": text[:200]}
+    if isinstance(text, Alert):
+        payload["show_alert"] = "true"
+    return _call("answerCallbackQuery", **payload)
 
 
 def clear_reply_markup(chat_id, message_id):

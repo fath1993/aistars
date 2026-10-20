@@ -61,9 +61,9 @@ class FakeTelegram:
 
 
 def keyboard_callbacks(payload) -> list:
-    """All callback_data values in a sent reply_markup."""
+    """All callback_data values in a sent reply_markup (a link button: its URL)."""
     markup = json.loads(payload["reply_markup"])
-    return [button["callback_data"]
+    return [button.get("callback_data", button.get("url"))
             for row in markup["inline_keyboard"] for button in row]
 
 

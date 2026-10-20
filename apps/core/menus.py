@@ -53,12 +53,16 @@ def help_text() -> str:
         _("Just type to chat with the AI. Send photos, files (PDF, Word, Excel, "
           "PowerPoint, text, code) or a voice note too; several at once as one album, with "
           "your question as its caption."),
+        _("Agents: AI assistants made for one job (a lawyer, a teacher, a translator, a "
+          "programmer…). Browse them by category, search, or let the AI find one for you."),
         _("Images: describe the image you want, or send a photo to change."),
         _("Voice: turn a voice note into text, or a text into speech."),
-        _("Assistants: ready-made helpers for translating, writing and more."),
-        _("Send /new to start a new chat; your chats are under 💬 Chat → My chats."),
-        _("Images and texts read aloud show their price first, and every answer shows what "
-          "it cost. You only pay what a request really costs."),
+        _("Every answer shows what it cost and your balance; 🧾 Details shows the tokens. "
+          "You only pay what a request really costs, and a big one asks you first."),
+        _("📊 Usage shows what you spent by day, tool, agent and model. You can set a daily "
+          "limit there."),
+        _("Commands: /new a new chat, /agents the agents, /chats your chats, /usage your "
+          "usage, /menu this menu."),
     ]
     lines = [f"{number}. {esc(step)}" for number, step in enumerate(steps, 1)]
     return _bold(_("How it works")) + "\n\n" + "\n".join(lines)
@@ -66,13 +70,13 @@ def help_text() -> str:
 
 def home_keyboard(account=None):
     from apps.billing.texts import credits_button
-    from apps.studio.bot import home_rows
+    from apps.studio.bot import account_buttons, home_rows
 
     return _inline([
         *home_rows(account),
-        [credits_button()],
-        [{"text": "❓ " + _("Help"), "callback_data": "menu:help"},
-         {"text": "👤 " + _("Profile"), "callback_data": "menu:profile"}],
+        [credits_button(), *account_buttons(account)],
+        [{"text": "👤 " + _("Profile"), "callback_data": "menu:profile"},
+         {"text": "❓ " + _("Help"), "callback_data": "menu:help"}],
     ])
 
 

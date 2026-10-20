@@ -1,7 +1,7 @@
 """
 Chat through the webhook: a message is checked, held, answered as it is
 written, and charged what it really cost; the chat remembers; chats can be
-changed, listed and deleted; assistants start chats that know their job.
+changed, listed and deleted. A message that can cost a lot asks first.
 """
 import json
 
@@ -40,8 +40,9 @@ class AnswerTests(StudioTestCase):
         self.assertEqual(final["message_id"], job.message_id)
         self.assertIn("Hello! <b>Here</b> you are.", final["text"])
         self.assertIn("<i>🪙 1 · GPT-6 Luna · Balance 🪙 499</i>", final["text"])
-        self.assertEqual(self.buttons(final), [f"out:say:{Message.objects.last().pk}", "out:new",
-                                               "menu:new"])
+        self.assertEqual(self.buttons(final), [f"out:say:{Message.objects.last().pk}",
+                                               f"out:cost:{job.pk}", "out:new", "menu:new"])
+        self.assertEqual((job.input_tokens, job.output_tokens), (1000, 200))
 
     def test_the_answer_is_shown_as_it_is_written(self):
         self.openai.answer = "word " * 60
@@ -58,6 +59,7 @@ class AnswerTests(StudioTestCase):
         self.assertNotIn("parse_mode", {k for edit in edits[:-1] for k, v in edit.items()
                                         if v is not None})
 
+    @runtime.override(CONFIRM_ABOVE_CREDITS=0)
     def test_the_hold_is_the_most_and_the_rest_comes_back(self):
         chat.choose_model(self.account, None, chat_model("gpt-6-astra"))
         self.say("Prove the Riemann hypothesis")
@@ -297,8 +299,9 @@ class DemoTests(StudioTestCase):
 class ChatScreenTests(StudioTestCase):
     def test_the_chat_screen(self):
         self.tap("chat:")
-        self.assertIn("Model: <b>GPT-6 Luna</b> — Fast and cheap", self.last_text())
-        self.assertEqual(self.buttons(), ["chat:models", "chat:new", "menu:home", "menu:home"])
+        self.assertIn("General assistant: helps with anything.", self.last_text())
+        self.assertIn("Model: <b>GPT-6 Luna</b> · An everyday answer: ~🪙 1", self.last_text())
+        self.assertEqual(self.buttons(), ["chat:new", "chat:models", "menu:home", "menu:home"])
         self.say("Hi")
         self.tap("chat:")
         self.assertIn("This chat: “Hi” · Messages: 2", self.last_text())
@@ -323,18 +326,22 @@ class ChatScreenTests(StudioTestCase):
     def test_a_new_chat_forgets_the_old_one(self):
         self.say("Remember: blue")
         self.tap("chat:new")
+        self.assertIn("Who do you want to talk to?", self.last_text())
+        self.assertEqual(Conversation.objects.count(), 1, "nothing is made until a choice")
+        self.tap("chat:general")
         self.say("What colour?")
         self.assertEqual(len(self.said()), 1)
         self.assertEqual(Conversation.objects.count(), 2)
 
     def test_an_empty_chat_is_reused_not_piled_up(self):
-        self.tap("chat:new")
-        self.tap("chat:new")
+        self.tap("chat:general")
+        self.tap("ag:start:lawyer")
+        self.tap("chat:general")
         self.assertEqual(Conversation.objects.count(), 1)
 
     def test_my_chats_open_and_delete(self):
         self.say("First chat")
-        self.tap("chat:new")
+        self.tap("chat:general")
         self.say("Second chat")
         self.tap("chat:list:0")
         first, second = Conversation.objects.order_by("id")
@@ -356,41 +363,147 @@ class ChatScreenTests(StudioTestCase):
         self.tap(f"chat:delok:{other.pk}")
         self.assertTrue(Conversation.objects.filter(pk=other.pk).exists())
 
-    def test_new_from_an_answer_opens_the_chat_screen_below(self):
+    def test_new_from_an_answer_opens_the_choice_below(self):
         self.say("Hi")
         answer = Job.objects.get().message_id
         self.tg.calls.clear()
         self.tap("out:new", message_id=answer)
         self.assertNotIn("editMessageText", self.tg.methods(), "the answer stays as it is")
-        self.assertIn("Type a message", self.last_payload("sendMessage")["text"])
+        self.assertIn("Who do you want to talk to?", self.last_payload("sendMessage")["text"])
         self.assertNotEqual(Account.objects.get(pk=self.account.pk).ui_message_id, answer)
 
     def test_the_new_command(self):
         self.say("Hi")
         self.say("/new")
+        self.assertIn("Who do you want to talk to?", self.last_text())
+        self.assertIn("chat:general", self.buttons())
+        self.tap("chat:general")
         self.assertEqual(Conversation.objects.count(), 2)
 
+    def test_the_chats_command(self):
+        self.say("Hi")
+        self.say("/chats")
+        self.assertIn("My chats", self.last_text())
+        self.assertEqual(self.buttons()[0], f"chat:open:{Conversation.objects.get().pk}")
 
-class AssistantTests(StudioTestCase):
-    def test_the_list_and_starting_one(self):
-        self.tap("asst:")
-        self.assertIn("🌐 <b>Translator</b>", self.last_text())
-        self.assertIn("asst:start:translator", self.buttons())
-        self.tap("asst:start:translator")
-        self.assertIn("Assistant: 🌐 Translator", self.last_text())
-        self.assertIn("Send the text, and say which language", self.last_text())
-        self.say("Bonjour tout le monde")
-        system = self.asked()["instructions"]
-        self.assertIn("Your role in this chat:\nYou are a professional translator.", system)
 
-    def test_an_assistant_with_its_own_model(self):
-        from apps.studio.models import Assistant
+class ConfirmTests(StudioTestCase):
+    """Above the owner's threshold, a message waits for the user's yes."""
 
-        sol = chat_model("gpt-6.1-sol")
-        Assistant.objects.filter(slug="code").update(model=sol)
-        self.tap("asst:start:code")
-        self.say("Fix my loop")
-        self.assertEqual(Job.objects.get().model, sol)
+    def setUp(self):
+        super().setUp()
+        chat.choose_model(self.account, None, chat_model("gpt-6-astra"))
+
+    def test_an_expensive_message_asks_first(self):
+        self.say("Prove the Riemann hypothesis")
+        self.assertFalse(Job.objects.exists())
+        self.assertEqual(self.openai.calls, [], "not even checked before the yes")
+        text = self.last_text()
+        self.assertIn("This message can cost up to 🪙", text)
+        self.assertIn("You pay only what it really costs", text)
+        self.assertEqual(self.buttons(), ["out:send", "out:models", "out:cancel"])
+        notice = self.last_payload("sendMessage")
+        self.tg.calls.clear()
+        self.tap("out:send", message_id=1)
+        job = Job.objects.get()
+        self.assertEqual((job.status, job.prompt), (Status.DONE, "Prove the Riemann hypothesis"))
+        self.assertIn("editMessageReplyMarkup", self.tg.methods(), "the Send button goes")
+        self.assertTrue(notice)
+
+    def test_once_agreed_the_chat_does_not_ask_again(self):
+        self.say("One")
+        self.tap("out:send", message_id=1)
+        self.say("Two")
+        self.assertEqual(Job.objects.count(), 2)
+
+    def test_cancel(self):
+        self.say("Prove it")
+        self.tap("out:cancel", message_id=1)
+        self.assertEqual(self.last_text(), "✖️ Not sent.")
+        self.assertEqual(self.tap("out:send", message_id=1), "That button has expired.")
+        self.assertFalse(Job.objects.exists())
+
+    def test_typing_something_else_drops_it(self):
+        self.say("Prove it")
+        chat.choose_model(self.account, chat.current(self.account), chat_model("gpt-6-luna"))
+        self.say("Never mind, hi")
+        self.assertEqual(Job.objects.get().prompt, "Never mind, hi")
+        self.assertEqual(self.tap("out:send", message_id=1), "That button has expired.")
+
+    @runtime.override(CONFIRM_ABOVE_CREDITS=0)
+    def test_the_owner_can_switch_it_off(self):
+        self.say("Prove it")
+        self.assertEqual(Job.objects.get().status, Status.DONE)
+
+    def test_a_long_chat_offers_a_new_one(self):
+        conversation = chat.current(self.account) or chat.new_conversation(self.account)
+        for number in range(6):
+            Message.objects.create(conversation=conversation, role="user" if number % 2 == 0
+                                   else "assistant", text="long " * 4000)
+        self.say("And now?")
+        self.assertIn("Most of it is the chat so far", self.last_text())
+        self.assertIn("out:sendnew", self.buttons())
+        self.tap("out:sendnew", message_id=1)
+        job = Job.objects.get()
+        self.assertNotEqual(job.conversation, conversation)
+        self.assertEqual(self.said(), [("user", "And now?")])
+
+
+class DailyLimitTests(StudioTestCase):
+    def test_a_request_past_the_limit_is_not_sent(self):
+        from apps.studio import usage
+
+        usage.set_limit(self.account, 20)
+        self.say("Hi")
+        self.assertEqual(Job.objects.count(), 1)
+        Job.objects.update(charged=20)
+        self.say("Again")
+        self.assertIn("Daily limit reached", self.last_text())
+        self.assertIn("You set a limit of 🪙 20 a day. Today 🪙 20 is spent or held", self.last_text())
+        self.assertEqual(self.buttons(), ["out:usage", "menu:new"])
+        self.assertEqual(Job.objects.count(), 1)
+        self.tap("out:usage", message_id=1)
+        self.assertIn("Daily limit: 🪙 20", self.last_text())
+
+    def test_what_is_held_counts_too(self):
+        from apps.studio import usage
+
+        usage.set_limit(self.account, 5)
+        Job.objects.create(account=self.account, kind="image", model=chat_model("gpt-6-luna"),
+                           chat_id=42, status=Status.RUNNING, hold=5)
+        self.say("Hi")
+        self.assertIn("Daily limit reached", self.last_text())
+
+
+class DetailsTests(StudioTestCase):
+    def test_details_show_the_tokens_and_the_hold(self):
+        self.say("Hi")
+        job = Job.objects.get()
+        text = self.tap(f"out:cost:{job.pk}", message_id=job.message_id)
+        self.assertEqual(text, f"💬 Chat answer #{job.pk}\nGPT-6 Luna\n"
+                               "Tokens: 1,000 read, 200 written\n"
+                               "Held 🪙 1, charged 🪙 1, returned 🪙 0")
+        self.assertEqual(self.tg.last("answerCallbackQuery")["show_alert"], "true")
+        self.assertNotIn("editMessageText", [m for m, p in self.tg.calls[-1:]])
+
+    def test_with_an_agent(self):
+        self.tap("ag:start:translator")
+        self.say("Bonjour")
+        job = Job.objects.get()
+        self.assertIn("GPT-6 Luna · 🌐 Translator", self.tap(f"out:cost:{job.pk}", message_id=1))
+
+    def test_someone_elses_request_shows_nothing(self):
+        other = register(77)
+        job = Job.objects.create(account=other, kind="chat", model=chat_model("gpt-6-luna"),
+                                 chat_id=77, status=Status.DONE)
+        self.assertEqual(self.tap(f"out:cost:{job.pk}", message_id=1), "")
+
+    @runtime.override(LOW_BALANCE_CREDITS=600)
+    def test_a_low_balance_says_so_with_a_buy_button(self):
+        self.say("Hi")
+        final = self.last_payload("editMessageText")
+        self.assertIn("⚠️ Your balance is low.", final["text"])
+        self.assertIn("out:buy", self.buttons(final))
 
 
 class ListenTests(StudioTestCase):

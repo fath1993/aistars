@@ -4,9 +4,10 @@ the rest of the bot (apps/core/i18n.py). Database texts users see (model
 taglines, assistants) go through catalog.tr. No number agreement: amounts
 appear as "🪙 3" or after a label.
 
-Callback data: panel screens use chat:, asst:, img: and voice:. Buttons on
-messages that are not the panel (an answer, an image, a notice) use out:, so
-tapping them never turns that message into the panel.
+Callback data: panel screens use chat:, ag: (agents), img:, voice: and use:
+(usage). Buttons on messages that are not the panel (an answer, an image, a
+notice) use out:, so tapping them never turns that message into the panel.
+Where a screen sits is shown as a trail: 🧩 Agents › ⚖️ Law.
 """
 
 import json
@@ -14,12 +15,13 @@ import json
 from django.utils import formats, timezone
 
 from apps.billing.texts import coins
+from apps.core import runtime
 from apps.core.i18n import gettext as _
 from apps.core.menus import menu_button, nav_row
 from apps.core.services.telegram import esc
 
 from . import catalog
-from .models import Kind
+from .models import Kind, Status
 
 VOICES = ("marin", "cedar", "coral", "nova", "onyx", "sage", "alloy", "echo")
 SIZES = ("1024x1024", "1024x1536", "1536x1024")
@@ -73,13 +75,24 @@ def voice_name(voice) -> str:
     return voice.capitalize()
 
 
+def low_balance(balance) -> bool:
+    return balance < int(runtime.get("LOW_BALANCE_CREDITS"))
+
+
 def footer(charged, balance, model=None) -> str:
     """Under every answer and result: what it cost, and what is left."""
     parts = [coins(charged)]
     if model is not None:
         parts.append(esc(model))
     parts.append(f"{esc(_('Balance'))} {coins(balance)}")
-    return "<i>" + " · ".join(parts) + "</i>"
+    text = "<i>" + " · ".join(parts) + "</i>"
+    if low_balance(balance):
+        text += "\n⚠️ " + esc(_("Your balance is low."))
+    return text
+
+
+def number(value) -> str:
+    return formats.number_format(value, force_grouping=True)
 
 
 def price_line(hold, balance) -> str:
@@ -94,21 +107,32 @@ def price_line(hold, balance) -> str:
 # Home
 # --------------------------------------------------------------------------
 
-def home_lines(model, balance) -> list:
-    lines = ["💬 " + esc(_("Just type a message to chat with the AI."))]
+def home_lines(conversation, model, balance) -> list:
+    lines = ["💬 " + esc(_("Just type to chat, or pick an agent made for your task."))]
+    agent = conversation.assistant if conversation is not None and conversation.assistant_id \
+        else None
+    if agent is not None:
+        lines.append(f"{esc(_('Agent'))}: {esc(agent_title(agent))}")
     if model is not None:
         lines.append(f"{esc(_('Model'))}: {esc(model)}")
     lines.append(f"{esc(_('Balance'))}: <b>{coins(balance)}</b>")
     return lines
 
 
-def home_rows() -> list:
+def home_rows(can_continue) -> list:
+    first = [{"text": "➕ " + _("New chat"), "callback_data": "chat:new"}]
+    if can_continue:
+        first.append({"text": "▶️ " + _("Continue"), "callback_data": "chat:"})
     return [
-        [{"text": "💬 " + _("Chat"), "callback_data": "chat:"},
-         {"text": "🎨 " + _("Images"), "callback_data": "img:"}],
-        [{"text": "🎙 " + _("Voice"), "callback_data": "voice:"},
-         {"text": "🧩 " + _("Assistants"), "callback_data": "asst:"}],
+        first,
+        [{"text": "🧩 " + _("Agents"), "callback_data": "ag:"},
+         {"text": "🎨 " + _("Images"), "callback_data": "img:"},
+         {"text": "🎙 " + _("Voice"), "callback_data": "voice:"}],
     ]
+
+
+def usage_button():
+    return {"text": "📊 " + _("Usage"), "callback_data": "use:"}
 
 
 def notice_keyboard():
@@ -119,31 +143,85 @@ def notice_keyboard():
 # Chat
 # --------------------------------------------------------------------------
 
-def chat_text(conversation, model, count) -> str:
-    lines = [f"💬 {_bold(_('Chat'))}", ""]
+def _agent_of(conversation):
+    return conversation.assistant if conversation is not None and conversation.assistant_id \
+        else None
+
+
+def chat_text(conversation, model, count, typical=None) -> str:
+    agent = _agent_of(conversation)
+    head = f"💬 {_bold(_('Chat'))}" + (f" · {esc(agent_title(agent))}" if agent else "")
+    lines = [head, ""]
+    if agent is not None:
+        lines.append(f"<i>{esc(catalog.tr(agent.description))}</i>")
+    else:
+        lines.append("🤖 " + esc(_("General assistant: helps with anything.")))
     if model is not None:
-        lines.append(f"{esc(_('Model'))}: {model_line(model)}")
-    if conversation is not None and conversation.assistant_id:
-        lines.append(f"{esc(_('Assistant'))}: {esc(conversation.assistant.emoji)} "
-                     f"{esc(catalog.tr(conversation.assistant.name))}")
+        price = f" · {esc(_('An everyday answer'))}: ~{coins(typical)}" if typical else ""
+        lines.append(f"{esc(_('Model'))}: <b>{esc(model)}</b>{price}")
     if count:
         title = conversation.title or "…"
         lines.append(f"{esc(_('This chat'))}: “{esc(title)}” · {esc(_('Messages'))}: {count}")
     lines.append("")
-    if conversation is not None and conversation.assistant_id and not count:
-        lines.append(esc(catalog.tr(conversation.assistant.first_message)
-                         or _("Type your message.")))
+    if agent is not None and not count:
+        lines.append(esc(catalog.tr(agent.first_message) or _("Type your message.")))
+        if agent.starters:
+            lines.append(esc(_("Or tap a question below to begin.")))
     else:
         lines.append(esc(_("Type a message, or send photos, files or a voice note, with a "
                            "question as their caption.")))
     return "\n".join(lines)
 
 
-def chat_keyboard(has_chats):
-    rows = [[{"text": "🤖 " + _("Model"), "callback_data": "chat:models"},
-             {"text": "➕ " + _("New chat"), "callback_data": "chat:new"}]]
+def starter_buttons(agent, verb) -> list:
+    """The agent's first questions, one a row; `verb` gets the question's number."""
+    return [[{"text": "💬 " + _cut(catalog.tr(starter), 64), "callback_data": f"{verb}:{index}"}]
+            for index, starter in enumerate((agent.starters or [])[:3])]
+
+
+def _cut(text, limit) -> str:
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+def chat_keyboard(conversation, count, has_chats):
+    agent = _agent_of(conversation)
+    rows = starter_buttons(agent, "ag:ask") if agent is not None and not count else []
+    rows.append([{"text": "➕ " + _("New chat") if count else "🧩 " + _("Change agent"),
+                  "callback_data": "chat:new"},
+                 {"text": "🤖 " + _("Model"), "callback_data": "chat:models"}])
+    row = []
     if has_chats:
-        rows.append([{"text": "🗂 " + _("My chats"), "callback_data": "chat:list:0"}])
+        row.append({"text": "🗂 " + _("My chats"), "callback_data": "chat:list:0"})
+    if agent is not None:
+        row.append({"text": "ℹ️ " + _("About the agent"), "callback_data": f"ag:card:{agent.slug}"})
+    if row:
+        rows.append(row)
+    rows.append(nav_row())
+    return _inline(rows)
+
+
+def new_chat_text() -> str:
+    return "\n".join([
+        f"➕ {_bold(_('New chat'))}", "",
+        esc(_("Who do you want to talk to? An agent knows one job well and asks the right "
+              "questions; the General assistant helps with anything.")),
+        "", esc(_("The price of an answer depends on the model, not the agent.")),
+    ])
+
+
+def new_chat_keyboard(featured, same, has_saved):
+    rows = []
+    if same is not None:
+        rows.append([{"text": "↻ " + _("Again with %(agent)s") % {"agent": agent_title(same)},
+                      "callback_data": f"ag:start:{same.slug}"}])
+    rows.append([{"text": "🤖 " + _("General assistant"), "callback_data": "chat:general"}])
+    rows += agent_buttons(featured[:6], "ag:start")
+    rows.append([{"text": "🧩 " + _("All agents"), "callback_data": "ag:"},
+                 {"text": "🔍 " + _("Search"), "callback_data": "ag:search"}])
+    row = [{"text": "✨ " + _("Find for me"), "callback_data": "ag:find"}]
+    if has_saved:
+        row.append({"text": "⭐ " + _("My agents"), "callback_data": "ag:saved"})
+    rows.append(row)
     rows.append(nav_row())
     return _inline(rows)
 
@@ -195,8 +273,8 @@ def chats_keyboard(conversations, page, has_more):
     return _inline(rows)
 
 
-def opened_text(conversation, model, count, last) -> str:
-    text = chat_text(conversation, model, count)
+def opened_text(conversation, model, count, last, typical=None) -> str:
+    text = chat_text(conversation, model, count, typical)
     if last is not None:
         excerpt = last.text if len(last.text) <= 300 else last.text[:300].rsplit(" ", 1)[0] + " …"
         who = _("AI") if last.role == "assistant" else _("You")
@@ -230,17 +308,67 @@ def thinking_text() -> str:
     return "💭 …"
 
 
-def answer_keyboard(message_pk, listen_price):
+def details_button(job):
+    return {"text": "🧾 " + _("Details"), "callback_data": f"out:cost:{job.pk}"}
+
+
+def buy_row():
+    return [{"text": "⭐ " + _("Buy credits"), "callback_data": "out:buy"}]
+
+
+def answer_keyboard(message_pk, listen_price, job, low=False):
     """Under an answer, which is not the panel: out: buttons only."""
-    rows = []
+    first = []
     if listen_price is not None:
-        rows.append([{"text": f"🔊 {_('Listen')} · {coins(listen_price)}",
-                      "callback_data": f"out:say:{message_pk}"},
-                     {"text": "➕ " + _("New chat"), "callback_data": "out:new"}])
-    else:
-        rows.append([{"text": "➕ " + _("New chat"), "callback_data": "out:new"}])
-    rows.append([menu_button(new=True)])
+        first.append({"text": f"🔊 {_('Listen')} · {coins(listen_price)}",
+                      "callback_data": f"out:say:{message_pk}"})
+    first.append(details_button(job))
+    rows = [first]
+    if low:
+        rows.append(buy_row())
+    rows.append([{"text": "➕ " + _("New chat"), "callback_data": "out:new"},
+                 menu_button(new=True)])
     return _inline(rows)
+
+
+def result_keyboard(job, low=False):
+    """Under a voice note read aloud or a text heard: what it cost, and the menu."""
+    rows = [[details_button(job), menu_button(new=True)]]
+    if low:
+        rows.insert(0, buy_row())
+    return _inline(rows)
+
+
+def details_text(job) -> str:
+    """The 🧾 Details box (plain text, at most 200 characters)."""
+    icon = {Kind.CHAT: "💬", Kind.IMAGE: "🎨", Kind.EDIT: "🖌", Kind.TRANSCRIBE: "📝",
+            Kind.SPEECH: "🔊"}.get(job.kind, "🧾")
+    lines = [f"{icon} {job_name(job)} #{job.pk}"]
+    what = [str(job.model)]
+    if job.assistant_id:
+        what.append(agent_title(job.assistant))
+    options = job.options or {}
+    if job.kind in (Kind.IMAGE, Kind.EDIT):
+        what.append(f"{size_name(options.get('size', ''))}, "
+                    f"{quality_name(options.get('quality', ''))}")
+    elif job.kind == Kind.TRANSCRIBE:
+        seconds = int(sum(item.get("seconds") or 0 for item in options.get("audio") or []))
+        what.append(f"{seconds // 60}:{seconds % 60:02d}")
+    elif job.kind == Kind.SPEECH:
+        what.append(f"{number(len(job.prompt))} {_('characters')}")
+    lines.append(" · ".join(what))
+    if job.input_tokens or job.output_tokens:
+        lines.append(_("Tokens: %(read)s read, %(wrote)s written") % {
+            "read": number(job.input_tokens), "wrote": number(job.output_tokens)})
+    if job.status == Status.DONE:
+        lines.append(_("Held %(hold)s, charged %(charged)s, returned %(back)s") % {
+            "hold": coins(job.hold), "charged": coins(job.charged),
+            "back": coins(job.hold - job.charged)})
+    elif job.status == Status.FAILED:
+        lines.append(_("Not done: nothing was charged."))
+    else:
+        lines.append(_("Being made: %(hold)s held.") % {"hold": coins(job.hold)})
+    return "\n".join(lines)[:200]
 
 
 def cut_off_text() -> str:
@@ -301,6 +429,45 @@ def not_enough_keyboard(chat=True):
     return _inline(rows)
 
 
+def confirm_text(hold, balance, long_chat) -> str:
+    lines = ["🧾 " + _bold(_("This message can cost up to %(price)s") % {"price": coins(hold)}),
+             "", esc(_("You pay only what it really costs, often much less."))]
+    if long_chat:
+        lines.append(esc(_("Most of it is the chat so far: every answer reads it all again. A "
+                           "new chat costs less.")))
+    lines += ["", f"{esc(_('Balance'))}: {coins(balance)}"]
+    return "\n".join(lines)
+
+
+def confirm_keyboard(hold, long_chat):
+    rows = [[{"text": f"✅ {_('Send')} · {_('up to')} {coins(hold)}",
+              "callback_data": "out:send"}]]
+    if long_chat:
+        rows.append([{"text": "➕ " + _("Send it in a new chat"), "callback_data": "out:sendnew"}])
+    rows.append([{"text": "🤖 " + _("Cheaper model"), "callback_data": "out:models"},
+                 {"text": "✖️ " + _("Cancel"), "callback_data": "out:cancel"}])
+    return _inline(rows)
+
+
+def cancelled_text() -> str:
+    return "✖️ " + _("Not sent.")
+
+
+def limit_text(limit, spent, hold) -> str:
+    return "\n".join([
+        "📊 " + _bold(_("Daily limit reached")), "",
+        esc(_("You set a limit of %(limit)s a day. Today %(spent)s is spent or held, and this "
+              "needs up to %(price)s.") % {"limit": coins(limit), "spent": coins(spent),
+                                           "price": coins(hold)}),
+        esc(_("It starts again tomorrow, or you can change it under 📊 Usage.")),
+    ])
+
+
+def limit_keyboard():
+    return _inline([[{"text": "📊 " + _("Usage"), "callback_data": "out:usage"},
+                     menu_button(new=True)]])
+
+
 def blocked_text(category_text) -> str:
     return "🚫 " + esc(_("This is not allowed: %(category)s.") % {"category": category_text})
 
@@ -341,29 +508,295 @@ def files_too_big_text() -> str:
 
 
 # --------------------------------------------------------------------------
-# Assistants
+# Agents
 # --------------------------------------------------------------------------
 
-def assistants_text(assistants) -> str:
-    lines = [f"🧩 {_bold(_('Assistants'))}", "",
-             esc(_("Ready-made helpers. Each starts a new chat that knows its job."))]
-    for assistant in assistants:
-        lines.append(f"\n{esc(assistant.emoji)} <b>{esc(catalog.tr(assistant.name))}</b>\n"
-                     f"<i>{esc(catalog.tr(assistant.description))}</i>")
-    return "\n".join(lines)
+def agent_title(agent) -> str:
+    return f"{agent.emoji} {catalog.tr(agent.name)}".strip()
 
 
-def assistants_keyboard(assistants):
+def category_title(category) -> str:
+    return f"{category.emoji} {catalog.tr(category.name)}".strip()
+
+
+def trail(*parts) -> str:
+    """Where a screen sits: 🧩 Agents › ⚖️ Law."""
+    last = len(parts) - 1
+    return "🧩 " + " › ".join(f"<b>{esc(part)}</b>" if index == last else esc(part)
+                             for index, part in enumerate(parts))
+
+
+def agent_buttons(agents, verb="ag:card", per_row=2) -> list:
     rows, row = [], []
-    for assistant in assistants:
-        row.append({"text": f"{assistant.emoji} {catalog.tr(assistant.name)}".strip(),
-                    "callback_data": f"asst:start:{assistant.slug}"})
+    for agent in agents:
+        row.append({"text": agent_title(agent)[:40], "callback_data": f"{verb}:{agent.slug}"})
+        if len(row) == per_row:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return rows
+
+
+def _agent_lines(agents) -> list:
+    return [f"{esc(agent.emoji)} <b>{esc(catalog.tr(agent.name))}</b> — "
+            f"<i>{esc(catalog.tr(agent.description))}</i>" for agent in agents]
+
+
+def agents_text(categories, count) -> str:
+    return "\n".join([
+        trail(_("Agents")), "",
+        esc(_("Agents are AI assistants made for one job: each knows its field, asks the right "
+              "questions and answers the way that job needs.")),
+        esc(_("Pick a category, search by words, or tell the AI what you need.")), "",
+        "<i>" + esc(_("%(agents)s agents in %(categories)s categories") % {
+            "agents": count, "categories": len(categories)}) + "</i>",
+    ])
+
+
+def agents_keyboard(categories, has_saved, has_recent):
+    rows, row = [], []
+    for category in categories:
+        row.append({"text": category_title(category), "callback_data": f"ag:cat:{category.slug}"})
         if len(row) == 2:
             rows.append(row)
             row = []
     if row:
         rows.append(row)
+    rows.append([{"text": "🔍 " + _("Search"), "callback_data": "ag:search"},
+                 {"text": "✨ " + _("Find for me"), "callback_data": "ag:find"}])
+    row = []
+    if has_saved:
+        row.append({"text": "⭐ " + _("My agents"), "callback_data": "ag:saved"})
+    if has_recent:
+        row.append({"text": "🕘 " + _("Recent"), "callback_data": "ag:recent"})
+    row.append({"text": "🔥 " + _("Popular"), "callback_data": "ag:top"})
+    rows.append(row)
     rows.append(nav_row())
+    return _inline(rows)
+
+
+def category_text(category, agents) -> str:
+    return "\n".join([trail(_("Agents"), category_title(category)), "",
+                      *_agent_lines(agents), "", esc(_("Tap an agent to see what it does."))])
+
+
+def category_keyboard(category, agents, page, has_more):
+    rows = agent_buttons(agents)
+    nav = []
+    if page > 0:
+        nav.append({"text": "‹ " + _("Previous"),
+                    "callback_data": f"ag:cat:{category.slug}:{page - 1}"})
+    if has_more:
+        nav.append({"text": _("More") + " ›", "callback_data": f"ag:cat:{category.slug}:{page + 1}"})
+    if nav:
+        rows.append(nav)
+    rows.append(nav_row("ag:"))
+    return _inline(rows)
+
+
+def card_text(agent, model, typical, saved) -> str:
+    where = [_("Agents")] + ([category_title(agent.category)] if agent.category_id else [])
+    lines = [trail(*where), "",
+             f"{esc(agent.emoji)} {_bold(catalog.tr(agent.name))}" + (" ⭐" if saved else ""),
+             f"<i>{esc(catalog.tr(agent.description))}</i>"]
+    if agent.starters:
+        lines += ["", esc(_("Try asking:"))]
+        lines += [f"• {esc(catalog.tr(starter))}" for starter in agent.starters[:3]]
+    if model is not None:
+        lines += ["", f"{esc(_('Model'))}: <b>{esc(model)}</b> · "
+                      f"{esc(_('An everyday answer'))}: ~{coins(typical)}"]
+    lines.append(f"<i>{esc(_('Every answer shows what it cost. You pay only what it really '
+                             'costs.'))}</i>")
+    return "\n".join(lines)
+
+
+def card_keyboard(agent, saved, share_url, back):
+    rows = [[{"text": "▶️ " + _("Start a chat"), "callback_data": f"ag:start:{agent.slug}"}]]
+    rows += starter_buttons(agent, f"ag:try:{agent.slug}")
+    row = [{"text": "✓ " + _("Saved") if saved else "⭐ " + _("Save"),
+            "callback_data": f"ag:save:{agent.slug}"}]
+    if share_url:
+        row.append({"text": "📤 " + _("Share"), "url": share_url})
+    rows.append(row)
+    rows.append(nav_row(back))
+    return _inline(rows)
+
+
+def saved_toast(saved) -> str:
+    return "⭐ " + _("Saved to My agents") if saved else _("Removed from My agents")
+
+
+LISTS = ("saved", "recent", "top", "search", "find")
+
+
+def list_text(kind, agents, words="") -> str:
+    title = {"saved": "⭐ " + _("My agents"), "recent": "🕘 " + _("Recent"),
+             "top": "🔥 " + _("Popular"), "search": "🔍 " + _("Search"),
+             "find": "✨ " + _("Found for you")}[kind]
+    lines = [trail(_("Agents"), title), ""]
+    if words:
+        lines += [f"“{esc(words[:200])}”", ""]
+    if agents:
+        lines += _agent_lines(agents)
+        if kind == "top":
+            lines += ["", f"<i>{esc(_('The agents people used most this month.'))}</i>"]
+        return "\n".join(lines)
+    lines.append(esc({
+        "saved": _("No saved agents yet. Open an agent and tap ⭐ Save to keep it here."),
+        "recent": _("No chats with an agent yet."),
+        "top": _("No agent has been used this month yet."),
+        "search": _("No agent matches these words. Try other words, or let the AI find one "
+                    "for you."),
+        "find": _("The AI found no agent for this. Try other words, or browse the "
+                  "categories."),
+    }[kind]))
+    return "\n".join(lines)
+
+
+def list_keyboard(kind, agents):
+    rows = agent_buttons(agents)
+    if kind == "search":
+        rows.append([{"text": "🔍 " + _("Search again"), "callback_data": "ag:search"},
+                     {"text": "✨ " + _("Find for me"), "callback_data": "ag:find"}])
+    elif kind == "find":
+        rows.append([{"text": "✨ " + _("Describe it again"), "callback_data": "ag:find"},
+                     {"text": "🔍 " + _("Search"), "callback_data": "ag:search"}])
+    rows.append(nav_row("ag:"))
+    return _inline(rows)
+
+
+def search_text() -> str:
+    return "\n".join([trail(_("Agents"), "🔍 " + _("Search")), "",
+                      esc(_("Type what you need, like “contract”, “English” or “recipe”."))])
+
+
+def find_text(left) -> str:
+    lines = [trail(_("Agents"), "✨ " + _("Find for me")), ""]
+    if left:
+        lines += [esc(_("Describe your task in your own words, in any language, and the AI "
+                        "picks the agents that fit it.")), "",
+                  f"<i>{esc(_('Free. Left today: %(left)s') % {'left': left})}</i>"]
+    else:
+        lines.append(esc(_("You have used today's free finds. Search by words instead, or "
+                           "browse the categories.")))
+    return "\n".join(lines)
+
+
+def find_keyboard(left):
+    rows = [] if left else [[{"text": "🔍 " + _("Search"), "callback_data": "ag:search"}]]
+    rows.append(nav_row("ag:"))
+    return _inline(rows)
+
+
+def finding_text() -> str:
+    return "\n".join([trail(_("Agents"), "✨ " + _("Find for me")), "",
+                      "🔎 " + esc(_("Looking for the right agents…"))])
+
+
+def asked_text(question) -> str:
+    """A starter question tapped: shown as what the user asked."""
+    return f"🗨 <i>{esc(question)}</i>"
+
+
+# --------------------------------------------------------------------------
+# Usage
+# --------------------------------------------------------------------------
+
+def tool_name(kind) -> str:
+    return {"chat": "💬 " + _("Chat"), "images": "🎨 " + _("Images"),
+            "voice": "🎙 " + _("Voice")}.get(kind, kind)
+
+
+def usage_text(periods, balance, limit, spent, tools, by_agent, by_model) -> str:
+    """`periods`: [(label, credits, requests)]; the rest: [(name, credits)]."""
+    lines = [f"📊 {_bold(_('Usage'))}", ""]
+    for label, credits, requests in periods:
+        lines.append(f"{esc(label)}: <b>{coins(credits)}</b> · {esc(_('Requests'))}: {requests}")
+    lines.append(f"{esc(_('Balance'))}: {coins(balance)}")
+    if limit:
+        lines.append(f"{esc(_('Daily limit'))}: {coins(limit)} · {esc(_('used today'))}: "
+                     f"{coins(spent)}")
+    else:
+        lines.append(f"{esc(_('Daily limit'))}: {esc(_('none'))}")
+    for title, rows in ((_("Last 30 days by tool"), tools), (_("By agent"), by_agent),
+                        (_("By model"), by_model)):
+        if rows:
+            lines += ["", _bold(title)]
+            lines += [f"{esc(name)}: {coins(credits)}" for name, credits in rows]
+    if not periods[-1][2]:
+        lines += ["", esc(_("No requests yet. Every answer, image and voice note shows here "
+                            "with what it cost."))]
+    lines += ["", "<i>" + esc(_("1,000 tokens are about 750 English words. Tap 🧾 Details "
+                                "under an answer for its tokens.")) + "</i>"]
+    return "\n".join(lines)
+
+
+def usage_keyboard():
+    from apps.billing.texts import credits_button
+
+    return _inline([
+        [{"text": "🧾 " + _("Last requests"), "callback_data": "use:last:0"},
+         {"text": "🎯 " + _("Daily limit"), "callback_data": "use:limit"}],
+        [credits_button()],
+        nav_row(),
+    ])
+
+
+def _request_line(job) -> str:
+    when = formats.date_format(timezone.localtime(job.created_at), "SHORT_DATETIME_FORMAT")
+    icon = {Kind.CHAT: "💬", Kind.IMAGE: "🎨", Kind.EDIT: "🖌", Kind.TRANSCRIBE: "📝",
+            Kind.SPEECH: "🔊"}.get(job.kind, "🧾")
+    name = agent_title(job.assistant) if job.assistant_id else job_name(job)
+    if job.status == Status.DONE:
+        price = coins(job.charged)
+    elif job.status == Status.FAILED:
+        price = _("nothing charged")
+    else:
+        price = _("being made")
+    return f"<code>#{job.pk}</code> {esc(when)}\n{icon} {esc(name)} · {esc(job.model)} · " \
+           f"<b>{esc(price)}</b>"
+
+
+def last_text(rows, page) -> str:
+    lines = [f"🧾 {_bold(_('Last requests'))}", ""]
+    if not rows:
+        lines.append(esc(_("No requests yet.")))
+    lines += [_request_line(job) for job in rows]
+    return "\n".join(lines)
+
+
+def last_keyboard(page, has_more):
+    rows, nav = [], []
+    if page > 0:
+        nav.append({"text": "‹ " + _("Newer"), "callback_data": f"use:last:{page - 1}"})
+    if has_more:
+        nav.append({"text": _("Older") + " ›", "callback_data": f"use:last:{page + 1}"})
+    if nav:
+        rows.append(nav)
+    rows.append(nav_row("use:"))
+    return _inline(rows)
+
+
+LIMITS = (0, 20, 50, 100, 200, 500, 1000)
+
+
+def limit_choice_text(limit, spent) -> str:
+    return "\n".join([
+        f"🎯 {_bold(_('Daily limit'))}", "",
+        esc(_("The most your requests may cost in a day. A request that would go past it is "
+              "not sent, and nothing is charged.")), "",
+        f"{esc(_('Now'))}: " + (coins(limit) if limit else esc(_("no limit"))),
+        f"{esc(_('Today'))}: {coins(spent)}",
+    ])
+
+
+def limit_choice_keyboard(current):
+    buttons = [{"text": _tick((current or 0) == amount,
+                              coins(amount) if amount else _("No limit")),
+                "callback_data": f"use:setlimit:{amount}"} for amount in LIMITS]
+    rows = [buttons[:1], buttons[1:4], buttons[4:]]
+    rows.append(nav_row("use:"))
     return _inline(rows)
 
 
@@ -459,11 +892,14 @@ def image_caption(job, balance) -> str:
     return f"🎨 #{job.pk}\n" + footer(job.charged, balance)
 
 
-def image_keyboard(job, original):
+def image_keyboard(job, original, low=False):
     rows = [[{"text": "🔁 " + _("Again"), "callback_data": f"out:again:{job.pk}"},
              {"text": "🖌 " + _("Edit this"), "callback_data": f"out:edit:{job.pk}"}]]
-    if original:
-        rows.append([{"text": "📎 " + _("Original file"), "callback_data": f"out:file:{job.pk}"}])
+    row = [{"text": "📎 " + _("Original file"), "callback_data": f"out:file:{job.pk}"}] \
+        if original else []
+    rows.append(row + [details_button(job)])
+    if low:
+        rows.append(buy_row())
     rows.append([menu_button(new=True)])
     return _inline(rows)
 

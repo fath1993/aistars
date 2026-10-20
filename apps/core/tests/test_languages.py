@@ -117,7 +117,7 @@ class PickerTests(TestCase):
                          "[ru] Chat with AI, create images and turn voice into text, right here "
                          "in Telegram.")
         buttons = json.loads(self.tg.last("sendMessage")["reply_markup"])["inline_keyboard"][1]
-        self.assertEqual([b["text"] for b in buttons], ["❓ [ru] Help", "👤 [ru] Profile"])
+        self.assertEqual([b["text"] for b in buttons], ["👤 [ru] Profile", "❓ [ru] Help"])
 
     def test_an_unused_language_cannot_be_chosen(self):
         Language.objects.filter(code="ru").update(used=False)

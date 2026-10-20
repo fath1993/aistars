@@ -50,6 +50,82 @@ touches one, update it in the same change.
 
 ## Changelog
 
+### 2026-10-20 — v0.3.0 — Agent catalog, costs on every request, Usage page
+
+The owner: when starting a chat, the user should choose the kind of
+assistant (predefined agents with their own instructions: a lawyer, a
+teacher, a translator, a programmer…), from a catalog they can browse by
+category or search; every request's cost and usage must be shown; the menus
+must let users move freely everywhere; "make my idea richer with your
+insight". The plan sent (Requests, below) was confirmed with "go ahead".
+
+**Agents.** Assistants are agents now, with **Categories** (emoji, name,
+order; names translated like the bot's texts), starter questions, search
+words and **Featured**. 39 agents in 10 categories to start (Law, Learning,
+Code & tech, Languages, Work & business, Writing, Money, Health & fitness,
+Creative, Daily life; migration 0005, updating the eight there were). Law,
+health and money agents give general information and say when a
+professional is needed; the harder jobs (lawyer, contracts, programmer,
+business…) use GPT-6.1 Sol, the rest the user's model.
+- 🧩 Agents: the categories, 🔍 Search, ✨ Find for me, ⭐ My agents,
+  🕘 Recent and 🔥 Popular (most used this month). Screens show where they
+  are: "🧩 Agents › ⚖️ Law".
+- An agent's card: what it does, its three questions, its model with the
+  price of an everyday answer, ▶️ Start a chat, a question to start with,
+  ⭐ Save, 📤 Share (Telegram's share sheet with
+  `t.me/<bot>?start=agent_<slug>`, which opens the card; a new user gets it
+  once registered). ‹ Back returns to the list it came from (a category
+  page, search results, found agents, the chat).
+- Search: words in the name, line and search words, in English and the
+  user's language; a word most agents have counts for little, common words
+  none ("write my cv" → CV & cover letter).
+- ✨ Find for me: the user describes the need, the model marked Default for
+  translation picks up to five agents (the user's words as data, not
+  instructions). Free, 20 a day (Runtime settings → **Find for me, per user
+  a day**), counted only when the AI answered; in Demo mode, or when it
+  fails, a word search.
+- ➕ New chat asks who to talk to: "Again with" the last agent, the General
+  assistant, the featured agents, All agents, Search, Find for me, My
+  agents. The chat screen names the agent, its line, the model and the
+  everyday price, and offers the agent's questions while the chat is empty
+  (a tapped question is shown as asked, then sent like a typed message).
+- For the owner: the Agents list shows each agent's chats and credits
+  charged (requests now keep their agent, even when the chat is deleted);
+  Category → **Draft 3 new agents with AI** writes agents switched off, to
+  read and switch on; the doctor counts agents and warns about agents in no
+  category.
+
+**What things cost.**
+- Every answer, image, voice note read aloud and text heard ends with what
+  it cost and the balance, and has **🧾 Details**: a box with the model, the
+  agent, the tokens read and written (as the provider reported them, now
+  kept on each request), the length or characters for voice, and the hold:
+  charged and returned.
+- A chat message that can cost more than **Ask before sending above**
+  (Runtime settings, 🪙 20; 0 never asks) waits: "This message can cost up
+  to 🪙 44", with Send, Cheaper model and Cancel, and, when most of the price
+  is the chat so far, **Send it in a new chat**. Nothing is checked or held
+  before the yes. Once agreed in a chat, only a message that can cost half
+  as much again asks, so an expensive model does not ask every time.
+- Below **Low balance warning** (Runtime settings, 🪙 20) results say "Your
+  balance is low" with Buy credits.
+- **📊 Usage** (home, `/usage`): today, 7 and 30 days (credits and
+  requests), the last 30 days by tool, agent and model, the last requests
+  page by page, and a **daily limit** users may set themselves (none, 🪙 20
+  to 🪙 1,000): a request that would pass it, counting what is held, is not
+  sent and says so, with the way to change it.
+
+**Getting around.** Home: ➕ New chat · ▶️ Continue (once there is a chat)
+/ 🧩 Agents · 🎨 Images · 🎙 Voice / 🪙 Credits · 📊 Usage / 👤 Profile ·
+❓ Help. Every screen keeps ‹ Back · 🏠 Menu. Commands `/new`, `/agents`,
+`/chats`, `/usage` with `/images`, `/voice`, `/menu`, `/help`; Help lists
+them and explains agents and costs.
+
+Tests: catalog, cards, starting and asking, saving, recent and popular,
+search, Find for me (AI, failure, none left, Demo), links before and after
+registering, drafting, admin counters; confirmation, daily limit, Details for
+every kind of request, low balance; Usage. 546 tests.
+
 ### 2026-10-20 — v0.2.0 — Read every kind of file, and an album as one message
 
 The owner: the bot must take "images, files, voices, PDFs… all kind of

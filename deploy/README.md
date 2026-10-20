@@ -181,13 +181,37 @@ visitor ⇄ HTTPS ⇄ Cloudflare ⇄ HTTP ⇄ edge (server-edge, Traefik, :80) �
   files a message. An album (several photos or files sent as one message) is
   one question with one answer. Files stay in the chat while it remembers
   their message, so follow-up questions work. The answer is written into one
-  message as it comes, then formatted, with what it cost. Users choose the model (each with the price of an everyday
-  answer), start new chats, reopen or delete old ones (**My chats**).
+  message as it comes, then formatted, with what it cost. Users choose the
+  model (each with the price of an everyday answer), start new chats with
+  the General assistant or an agent, reopen or delete old ones (**My
+  chats**).
   **🔊 Listen** under an answer reads it aloud. Runtime settings: **Chat
   memory** (earlier messages sent with each new one), **Longest message**,
   **Requests at once per user**.
-- **🧩 Assistants:** AI tools → **Assistants**: ready-made chats with their own
-  instructions (and, if you like, their own model). Eight to start with.
+- **🧩 Agents:** AI assistants made for one job, each with its own
+  instructions (in English; it answers in the user's language), starter
+  questions users can tap, and optionally its own model. 39 to start with, in
+  10 categories (AI tools → **Categories** and **Agents**). Users browse by
+  category, search by words (name, line and **search words**, in English and
+  their language), or tap **✨ Find for me** and describe their need (the
+  model marked Default for translation picks; free for users, **Find for me,
+  per user a day** in Runtime settings). Each agent has a card (what it does,
+  its questions, its model and everyday price, ▶️ Start, ⭐ Save, 📤 Share
+  with a link `t.me/<bot>?start=agent_<slug>` that opens the card, even for
+  someone who still has to register). **Featured** agents are offered first
+  in ➕ New chat. The Agents list shows each one's chats and credits charged.
+  Category → action **Draft 3 new agents with AI** writes agents for it,
+  switched off, for you to read and switch on.
+- **What things cost:** every answer, image and voice result ends with what
+  it cost and the balance; **🧾 Details** shows the model, agent, tokens and
+  the hold (charged, returned). A chat message that can cost more than **Ask
+  before sending above** (Runtime settings, 🪙 20) waits for **Send**; once
+  agreed in a chat, only one that can cost half as much again asks. Below
+  **Low balance warning**, results say so with a Buy credits button.
+  **📊 Usage** (home, `/usage`) shows today, 7 and 30 days, by tool, agent and
+  model, the last requests, and a daily limit users may set themselves.
+- **Commands:** `/new`, `/agents`, `/chats`, `/usage`, `/images`, `/voice`,
+  `/menu`, `/help` (typed; there is no ☰ command list).
 - **🎨 Images:** Create an image from a description, or Edit a photo (or
   several, sent as one album). Shape
   and quality are buttons; the summary shows the most it can cost. The image

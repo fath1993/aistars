@@ -11,6 +11,7 @@ cost and the balance.
 
 import time
 
+from django.core.cache import cache
 from django.db.models import Count
 from django.utils import timezone
 
@@ -45,6 +46,9 @@ TYPICAL = (1500, 700)
 # How often an answer being written is shown (Telegram allows about one edit
 # a second per chat).
 EDIT_EVERY = 1.5
+# Once a price is agreed in a chat, it is asked again only for a message that
+# can cost this many times more.
+ASK_AGAIN_ABOVE = 1.5
 
 
 # --------------------------------------------------------------------------
@@ -153,10 +157,12 @@ def estimate(model, conversation, text, attachments) -> int:
     return model.cost_micros(tokens_in, model.max_output_tokens)
 
 
-def send(account, chat_id, text, attachments=(), voice=False, conversation=None):
+def send(account, chat_id, text, attachments=(), voice=False, conversation=None,
+         confirmed=False):
     """
     A message from the user, with its photos and files: checked, priced and
-    held, then answered in the background.
+    held, then answered in the background. One that can cost more than the
+    owner's threshold waits for the user to agree (out:send).
     """
     attachments = list(attachments)
     limit = int(runtime.get("CHAT_MAX_MESSAGE_CHARS"))
@@ -175,6 +181,13 @@ def send(account, chat_id, text, attachments=(), voice=False, conversation=None)
     if Job.objects.filter(conversation=conversation, kind=Kind.CHAT,
                           status__in=ACTIVE).exists():
         return _notice(chat_id, texts.busy_text())
+    estimate_micros = estimate(model, conversation, text, attachments)
+    hold = jobs.hold_for(estimate_micros, model)
+    if confirmed:
+        cache.set(_agreed_key(conversation), hold, 60 * 60 * 24)
+    elif _ask_first(conversation, hold):
+        return _confirm(account, chat_id, conversation, model, text, attachments, voice, hold,
+                        estimate_micros)
 
     photos = [item["file_id"] for item in attachments if item["kind"] == "photo"]
     documents = [{key: item.get(key) for key in ("file_id", "name", "mime", "size", "pages")}
@@ -185,13 +198,14 @@ def send(account, chat_id, text, attachments=(), voice=False, conversation=None)
     if not _passed(account, chat_id, screening):
         return None
     try:
-        job = jobs.start(account, chat_id, Kind.CHAT, model,
-                         estimate(model, conversation, text, attachments),
+        job = jobs.start(account, chat_id, Kind.CHAT, model, estimate_micros,
                          conversation=conversation, prompt=text, photos=photos,
                          screening=screening)
     except jobs.NotEnough as exc:
         return telegram.send_message(chat_id, texts.not_enough_text(exc.hold, exc.balance),
                                      reply_markup=texts.not_enough_keyboard())
+    except jobs.LimitReached as exc:
+        return limit_notice(chat_id, exc)
     except jobs.TooMany:
         return _notice(chat_id, texts.too_many_text())
     Message.objects.create(conversation=conversation, role=Role.USER, text=text, photos=photos,
@@ -203,6 +217,64 @@ def send(account, chat_id, text, attachments=(), voice=False, conversation=None)
         archive.copy_input(job, "document", item["file_id"])
     _begin(job)
     return job
+
+
+def _agreed_key(conversation):
+    return f"chat:agreed:{conversation.pk}"
+
+
+def _ask_first(conversation, hold) -> bool:
+    """
+    Above the owner's threshold, unless the user agreed to about as much in
+    this chat already: asking before every message of an expensive model
+    would only teach them to tap Send without reading.
+    """
+    threshold = int(runtime.get("CONFIRM_ABOVE_CREDITS"))
+    if not threshold or hold <= threshold:
+        return False
+    agreed = cache.get(_agreed_key(conversation)) or 0
+    return hold > agreed * ASK_AGAIN_ABOVE
+
+
+def _confirm(account, chat_id, conversation, model, text, attachments, voice, hold,
+             estimate_micros):
+    """The price first; the message waits for out:send (state "confirm_send")."""
+    from apps.billing import ledger
+
+    from . import state
+
+    alone = model.cost_micros(
+        int((len(system_prompt(conversation)) + len(text)) / CHARS_PER_TOKEN)
+        + sum(files.tokens(item) for item in attachments), model.max_output_tokens)
+    long_chat = conversation.messages.count() >= 4 and alone < estimate_micros * 0.6
+    state.wait(account, "confirm_send", text=text, attachments=attachments, voice=voice,
+               conversation=conversation.pk)
+    telegram.send_message(chat_id, texts.confirm_text(hold, ledger.balance(account), long_chat),
+                          reply_markup=texts.confirm_keyboard(hold, long_chat))
+    return None
+
+
+def send_confirmed(account, chat_id, new_chat=False):
+    """out:send: the message that waited for the user's yes. False when none waits."""
+    from . import state
+
+    draft = state.waiting(account) or {}
+    if draft.get("step") != "confirm_send":
+        return False
+    state.stop(account)
+    conversation = Conversation.objects.filter(
+        pk=draft.get("conversation"), account=account).select_related("assistant").first()
+    if conversation is not None and new_chat:
+        conversation = new_conversation(account, conversation.assistant)
+    send(account, chat_id, draft["text"], attachments=draft.get("attachments") or [],
+         voice=draft.get("voice", False), conversation=conversation, confirmed=True)
+    return True
+
+
+def limit_notice(chat_id, exc):
+    telegram.send_message(chat_id, texts.limit_text(exc.limit, exc.spent, exc.hold),
+                          reply_markup=texts.limit_keyboard())
+    return None
 
 
 def _refused(model, attachments) -> str:
@@ -238,6 +310,8 @@ def retry(account, chat_id, failed_job):
     except jobs.NotEnough as exc:
         return telegram.send_message(chat_id, texts.not_enough_text(exc.hold, exc.balance),
                                      reply_markup=texts.not_enough_keyboard())
+    except jobs.LimitReached as exc:
+        return limit_notice(chat_id, exc)
     except jobs.TooMany:
         return _notice(chat_id, texts.too_many_text())
     Message.objects.filter(pk=message.pk).update(job=job)
@@ -312,7 +386,7 @@ def answer(job):
         first = conversation.messages.filter(role=Role.USER).order_by("id").first()
         title = " ".join((first.text if first else "").split())[:60] or _("Photo")
         Conversation.objects.filter(pk=conversation.pk).update(title=title)
-    balance = jobs.done(job, reply.cost_micros)
+    balance = jobs.done(job, reply.cost_micros, reply.input_tokens, reply.output_tokens)
     _write(job, reply, balance)
 
 
@@ -364,7 +438,8 @@ def _write(job, reply, balance):
     footer = texts.footer(job.charged, balance, job.model)
     footer_plain = footer.replace("<i>", "").replace("</i>", "")
     answer_row = Message.objects.filter(job=job, role=Role.ASSISTANT).first()
-    markup = texts.answer_keyboard(answer_row.pk, listen_price(text))
+    markup = texts.answer_keyboard(answer_row.pk, listen_price(text), job,
+                                   texts.low_balance(balance))
 
     last = len(parts) - 1
     for number, (html_text, plain_text) in enumerate(parts):

@@ -195,6 +195,11 @@ def go(account, chat_id):
     except jobs.NotEnough:
         summary(account, chat_id, draft)
         return ""
+    except jobs.LimitReached as exc:
+        from .chat import limit_notice
+
+        limit_notice(chat_id, exc)
+        return ""
     except jobs.TooMany:
         return texts.too_many_text()
     state.stop(account)
@@ -251,6 +256,8 @@ def make(job):
                                   reply_markup=texts.notice_keyboard())
             return
         data, cost = picture.data, picture.cost_micros
+        job.input_tokens = picture.input_tokens + picture.image_input_tokens
+        job.output_tokens = picture.output_tokens
     _deliver(job, data, cost)
 
 
@@ -272,7 +279,7 @@ def _deliver(job, data, cost):
     original = archive.store_output(job, "document", data, f"image-{job.pk}.png", "image/png",
                                     role="original")
     original_id = telegram.file_id_of(original, "document")
-    markup = texts.image_keyboard(job, bool(original_id))
+    markup = texts.image_keyboard(job, bool(original_id), texts.low_balance(balance))
     sent = None
     if stored:
         file_id = telegram.file_id_of(stored, "photo")
@@ -285,5 +292,5 @@ def _deliver(job, data, cost):
     Job.objects.filter(pk=job.pk).update(
         result_file_id=telegram.file_id_of(sent, "photo"), original_file_id=original_id,
         archive_message_id=(stored or {}).get("message_id"))
-    jobs.done(job, cost)
+    jobs.done(job, cost, job.input_tokens, job.output_tokens)
 
