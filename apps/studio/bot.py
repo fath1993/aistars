@@ -13,12 +13,10 @@ from apps.billing import ledger
 from apps.billing import texts as billing_texts
 from apps.core import menus
 from apps.core.i18n import gettext as _
-from apps.core.services import telegram, ui
+from apps.core.services import ui
 
 from . import chat, images, jobs, state, texts, voice
 from .models import Assistant, Conversation, Job, Message, Role
-
-IMAGE_TYPES = ("image/jpeg", "image/png", "image/webp")
 
 
 # --------------------------------------------------------------------------
@@ -79,35 +77,13 @@ def handle_text(account, chat_id, text) -> bool:
 
 
 def handle_media(account, chat_id, message) -> bool:
+    """Photos, files and voice notes: one message, however many it carries (album.py)."""
     if not jobs.may_use(account):
         return False
-    draft = state.waiting(account) or {}
-    step = draft.get("step")
-    photo = _photo_of(message)
-    audio = voice.audio_of(message)
-    caption = (message.get("caption") or "").strip()
-    if photo:
-        if step in ("edit_photo", "edit_prompt", "image_summary"):
-            images.got_photo(account, chat_id, photo,
-                             {**draft, "prompt": caption} if caption else draft)
-        else:
-            state.stop(account)
-            chat.send(account, chat_id, caption or _("What is in this photo?"), photos=[photo])
-    elif audio:
-        voice.start_transcription(account, chat_id, audio, then_chat=step != "transcribe")
-    else:
-        telegram.send_message(chat_id, telegram.esc(texts.files_text()),
-                              reply_markup=texts.notice_keyboard())
+    from . import album
+
+    album.add(account, chat_id, message)
     return True
-
-
-def _photo_of(message):
-    if message.get("photo"):
-        return message["photo"][-1]["file_id"]
-    document = message.get("document") or {}
-    if document.get("mime_type") in IMAGE_TYPES:
-        return document["file_id"]
-    return None
 
 
 # --------------------------------------------------------------------------

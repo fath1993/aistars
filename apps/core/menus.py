@@ -50,7 +50,9 @@ def home_text(account=None) -> str:
 
 def help_text() -> str:
     steps = [
-        _("Just type to chat with the AI. Send a photo with a question, or a voice note."),
+        _("Just type to chat with the AI. Send photos, files (PDF, Word, Excel, "
+          "PowerPoint, text, code) or a voice note too; several at once as one album, with "
+          "your question as its caption."),
         _("Images: describe the image you want, or send a photo to change."),
         _("Voice: turn a voice note into text, or a text into speech."),
         _("Assistants: ready-made helpers for translating, writing and more."),

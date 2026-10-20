@@ -173,16 +173,23 @@ visitor ⇄ HTTPS ⇄ Cloudflare ⇄ HTTP ⇄ edge (server-edge, Traefik, :80) �
 - **Demo mode** (Control panel, on by default): every tool answers without
   calling any provider (a demo answer, a sample image, a sample voice note);
   credits are held and charged as usual. Off: each model uses its provider.
-- **💬 Chat:** type, send a photo with a question, or a voice note. The
-  answer is written into one message as it comes, then formatted, with what
-  it cost. Users choose the model (each with the price of an everyday
+- **💬 Chat:** type, or send photos, files or a voice note, with the
+  question as the caption. The AI reads photos, PDFs (text and page images),
+  Word and other documents, Excel/CSV (the first 1,000 rows a sheet),
+  PowerPoint, text and code (OpenAI's models; Claude's read PDFs, text and
+  photos); at most 20 MB a file (Telegram's limit for bots), 50 MB and 20
+  files a message. An album (several photos or files sent as one message) is
+  one question with one answer. Files stay in the chat while it remembers
+  their message, so follow-up questions work. The answer is written into one
+  message as it comes, then formatted, with what it cost. Users choose the model (each with the price of an everyday
   answer), start new chats, reopen or delete old ones (**My chats**).
   **🔊 Listen** under an answer reads it aloud. Runtime settings: **Chat
   memory** (earlier messages sent with each new one), **Longest message**,
   **Requests at once per user**.
 - **🧩 Assistants:** AI tools → **Assistants**: ready-made chats with their own
   instructions (and, if you like, their own model). Eight to start with.
-- **🎨 Images:** Create an image from a description, or Edit a photo. Shape
+- **🎨 Images:** Create an image from a description, or Edit a photo (or
+  several, sent as one album). Shape
   and quality are buttons; the summary shows the most it can cost. The image
   comes with **Again**, **Edit this** and, with the archive channel, the
   **Original file**.

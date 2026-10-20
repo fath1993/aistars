@@ -130,9 +130,9 @@ def _handle_message(message):
         _route_message(account, message)
 
 
-# Files the AI tools take: photos (chat, image edits), voice notes and audio
-# (chat, voice to text), and images sent as files.
-MEDIA_KEYS = ("photo", "document", "voice", "audio")
+# Files: photos, documents, voice notes and audio go to the AI tools; a video
+# is answered there too ("not read yet"). Stickers are ignored.
+MEDIA_KEYS = ("photo", "document", "voice", "audio", "video", "animation", "video_note")
 
 
 def _route_message(account, message):

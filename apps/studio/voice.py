@@ -22,19 +22,6 @@ MAX_SECONDS = 20 * 60
 TTS_LIMIT = 4000
 
 
-def audio_of(message):
-    """A voice note or audio file in a message: its file and length, or None."""
-    if message.get("voice"):
-        voice = message["voice"]
-        return {"file_id": voice["file_id"], "seconds": voice.get("duration") or 0,
-                "filename": "voice.ogg", "kind": "voice"}
-    if message.get("audio"):
-        audio = message["audio"]
-        return {"file_id": audio["file_id"], "seconds": audio.get("duration") or 0,
-                "filename": audio.get("file_name") or "audio.mp3", "kind": "audio"}
-    return None
-
-
 def voice_of(account) -> str:
     from .chat import profile
 
@@ -91,14 +78,17 @@ def ask_text(account, chat_id):
 # Voice to text
 # --------------------------------------------------------------------------
 
-def start_transcription(account, chat_id, audio, then_chat=False):
-    """A voice note in: its text, and with `then_chat` the AI's answer to it."""
+def start_transcription(account, chat_id, audio, then_chat=False, attachments=()):
+    """
+    Voice notes or audio files in (several when sent as one album): their
+    text, and with `then_chat` the AI's answer to it, with `attachments`.
+    """
     model = stt_model()
     if model is None:
         return _notice(chat_id, texts.no_model_text())
-    if not audio["seconds"]:
+    if not all(item["seconds"] for item in audio):
         return _notice(chat_id, texts.no_duration_text())
-    if audio["seconds"] > MAX_SECONDS:
+    if sum(item["seconds"] for item in audio) > MAX_SECONDS:
         return _notice(chat_id, texts.too_long_audio_text())
     conversation = None
     if then_chat:
@@ -107,17 +97,18 @@ def start_transcription(account, chat_id, audio, then_chat=False):
         conversation = chat.current(account) or chat.new_conversation(account)
     try:
         job = jobs.start(account, chat_id, Kind.TRANSCRIBE, model,
-                         model.audio_cost_micros(audio["seconds"]), photos=[audio["file_id"]],
-                         conversation=conversation,
-                         options={"seconds": audio["seconds"], "filename": audio["filename"],
-                                  "kind": audio["kind"], "then_chat": then_chat})
+                         sum(model.audio_cost_micros(item["seconds"]) for item in audio),
+                         photos=[item["file_id"] for item in audio], conversation=conversation,
+                         options={"audio": list(audio), "then_chat": then_chat,
+                                  "attachments": list(attachments)})
     except jobs.NotEnough as exc:
         return telegram.send_message(chat_id, texts.not_enough_text(exc.hold, exc.balance),
                                      reply_markup=texts.not_enough_keyboard(chat=then_chat))
     except jobs.TooMany:
         return _notice(chat_id, texts.too_many_text())
     state.stop(account)
-    archive.copy_input(job, audio["kind"], audio["file_id"])
+    for item in audio:
+        archive.copy_input(job, item["kind"], item["file_id"])
     sent = telegram.send_message(chat_id, texts.listening_text())
     if sent:
         jobs.note_message(job, sent["message_id"])
@@ -126,16 +117,22 @@ def start_transcription(account, chat_id, audio, then_chat=False):
 
 
 def transcribe(job):
-    seconds = job.options.get("seconds") or 0
-    if job.demo:
-        text, cost = demo.transcript(seconds), job.estimate_micros
-    else:
-        try:
-            audio = telegram.download_file(job.photos[0])
-        except ValueError as exc:
-            raise clients.AIError(f"the audio could not be had: {exc}") from None
-        text, cost = clients.transcribe(job.model, audio, job.options.get("filename", "voice.ogg"),
-                                        seconds)
+    heard, cost = [], 0
+    for item in job.options.get("audio") or []:
+        if job.demo:
+            text, price = demo.transcript(item["seconds"]), job.model.audio_cost_micros(
+                item["seconds"])
+        else:
+            try:
+                audio = telegram.download_file(item["file_id"])
+            except ValueError as exc:
+                raise clients.AIError(f"the audio could not be had: {exc}") from None
+            text, price = clients.transcribe(job.model, audio, item.get("name") or "voice.ogg",
+                                             item["seconds"])
+        if text:
+            heard.append(text)
+        cost += price
+    text = "\n\n".join(heard)
     balance = jobs.done(job, cost)
     then_chat = job.options.get("then_chat")
     shown = texts.transcript_text(text, then_chat) if text else telegram.esc(
@@ -146,7 +143,8 @@ def transcribe(job):
             from . import chat
 
             conversation = Conversation.objects.filter(pk=job.conversation_id).first()
-            chat.send(job.account, job.chat_id, text, voice=True, conversation=conversation)
+            chat.send(job.account, job.chat_id, text, voice=True, conversation=conversation,
+                      attachments=job.options.get("attachments") or [])
         return
     if not text:
         _write(job, shown, texts.footer(job.charged, balance), texts.notice_keyboard())

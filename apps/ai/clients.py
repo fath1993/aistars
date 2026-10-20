@@ -2,7 +2,8 @@
 Calling the AI providers. One function per kind of work:
 
     ask          one question, one answer (translation, the safety judge)
-    chat         a conversation, streamed as it is written (the bot's Chat)
+    chat         a conversation, with photos and files, streamed as it is
+                 written (the bot's Chat); OpenAI's through its Responses API
     image        an image made from a prompt, or a photo changed
     transcribe   a voice note turned into text
     speak        a text read aloud, as a voice note
@@ -153,8 +154,9 @@ def chat(model, system, messages, purpose, max_tokens=None, on_text=None,
          estimate_micros=0) -> Reply:
     """
     A conversation: `messages` are {"role": "user" | "assistant", "text",
-    "images": [(bytes, media type)]}, oldest first. With `on_text`, the answer
-    is streamed and on_text(text so far) is called as it grows.
+    "images": [(bytes, media type)], "files": [{"name", "media_type",
+    "data"}]}, oldest first. With `on_text`, the answer is streamed and
+    on_text(text so far) is called as it grows.
     """
     _guard(model, estimate_micros)
     max_tokens = max_tokens or model.max_output_tokens
@@ -170,55 +172,98 @@ def chat(model, system, messages, purpose, max_tokens=None, on_text=None,
     return Reply(text, tokens_in, tokens_out, cost, cut)
 
 
+def _data_url(media_type, data) -> str:
+    return f"data:{media_type};base64,{_encoded(data)}"
+
+
 def _openai_content(message):
-    if not message.get("images"):
+    """
+    The Responses API's input: an answer as plain text; the user's files
+    and photos before their words.
+    """
+    if message["role"] == "assistant":
         return message["text"]
-    return [{"type": "image_url",
-             "image_url": {"url": f"data:{media_type};base64,{_encoded(data)}"}}
-            for data, media_type in message["images"]] + [
-        {"type": "text", "text": message["text"]}]
+    parts = [{"type": "input_file", "filename": item["name"],
+              "file_data": _data_url(item["media_type"], item["data"])}
+             for item in message.get("files") or []]
+    parts += [{"type": "input_image", "image_url": _data_url(media_type, data)}
+              for data, media_type in message.get("images") or []]
+    return parts + [{"type": "input_text", "text": message["text"]}]
 
 
 def _openai(model, system, messages, max_tokens, on_text):
+    """
+    OpenAI's Responses API: the one that reads every kind of file (Chat
+    Completions reads only PDFs). Nothing is stored at OpenAI (store false).
+    """
     payload = {
         "model": model.model_id,
-        "max_completion_tokens": max_tokens,
-        "messages": [{"role": "system", "content": system}] + [
-            {"role": message["role"], "content": _openai_content(message)}
-            for message in messages],
+        "instructions": system,
+        "input": [{"role": message["role"], "content": _openai_content(message)}
+                  for message in messages],
+        "max_output_tokens": max_tokens,
+        "store": False,
     }
-    url = f"{model.provider.endpoint}/v1/chat/completions"
+    url = f"{model.provider.endpoint}/v1/responses"
     if on_text is None:
-        body = _json(_post(url, _headers(model), payload))
-        choice = (body.get("choices") or [{}])[0]
-        usage = body.get("usage") or {}
-        return ((choice.get("message") or {}).get("content") or "",
-                int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0)),
-                choice.get("finish_reason") == "length")
+        return _openai_result(_json(_post(url, _headers(model), payload)))
 
-    payload.update(stream=True, stream_options={"include_usage": True})
-    text, usage, finish = "", {}, ""
+    payload["stream"] = True
+    text, result = "", None
     for event in _events(url, _headers(model), payload):
-        if event.get("error"):
-            raise AIError(f"stream error: {event['error'].get('message', event['error'])}")
-        usage = event.get("usage") or usage
-        for choice in event.get("choices") or []:
-            piece = (choice.get("delta") or {}).get("content") or ""
-            finish = choice.get("finish_reason") or finish
-            if piece:
-                text += piece
-                on_text(text)
-    return (text, int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0)),
-            finish == "length")
+        kind = event.get("type")
+        if kind == "response.output_text.delta":
+            text += event.get("delta") or ""
+            on_text(text)
+        elif kind in ("response.completed", "response.incomplete"):
+            result = event.get("response") or {}
+        elif kind == "response.failed":
+            error = (event.get("response") or {}).get("error") or {}
+            raise AIError(f"the answer failed: {error.get('message') or error}")
+        elif kind == "error":
+            raise AIError(f"stream error: {event.get('message') or event}")
+    if result is None:
+        raise AIError("the answer stopped before it was complete")
+    usage = result.get("usage") or {}
+    return (text, int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0)),
+            _cut_off(result))
+
+
+def _openai_result(body):
+    text = "".join(part.get("text", "") for item in body.get("output") or []
+                   if item.get("type") == "message"
+                   for part in item.get("content") or [] if part.get("type") == "output_text")
+    usage = body.get("usage") or {}
+    return (text, int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0)),
+            _cut_off(body))
+
+
+def _cut_off(response) -> bool:
+    details = response.get("incomplete_details") or {}
+    return response.get("status") == "incomplete" and details.get("reason") == "max_output_tokens"
 
 
 def _anthropic_content(message):
-    if not message.get("images"):
+    """Photos as images, PDFs as documents, text files as text documents."""
+    if not message.get("images") and not message.get("files"):
         return message["text"]
-    return [{"type": "image", "source": {"type": "base64", "media_type": media_type,
-                                         "data": _encoded(data)}}
-            for data, media_type in message["images"]] + [
-        {"type": "text", "text": message["text"]}]
+    parts = []
+    for item in message.get("files") or []:
+        if item["media_type"] == "application/pdf":
+            source = {"type": "base64", "media_type": item["media_type"],
+                      "data": _encoded(item["data"])}
+        else:
+            try:
+                source = {"type": "text", "media_type": "text/plain",
+                          "data": item["data"].decode("utf-8")}
+            except UnicodeDecodeError:
+                raise AIError(f"{item['name']} is not plain text, which is all "
+                              "Anthropic's models read besides PDFs") from None
+        parts.append({"type": "document", "source": source, "title": item["name"]})
+    parts += [{"type": "image", "source": {"type": "base64", "media_type": media_type,
+                                           "data": _encoded(data)}}
+              for data, media_type in message.get("images") or []]
+    return parts + [{"type": "text", "text": message["text"]}]
 
 
 def _anthropic(model, system, messages, max_tokens, on_text):

@@ -32,7 +32,10 @@ class AnswerTests(StudioTestCase):
         # 1000 in x $0.10 + 200 out x $0.50 per 1M = $0.0002: the least, one credit.
         self.assertEqual((job.cost_micros, job.hold, job.charged), (200, 1, 1))
         self.assertEqual(self.balance(), 499)
-        self.assertEqual(self.openai.paths(), ["moderations", "chat/completions"])
+        self.assertEqual(self.openai.paths(), ["moderations", "responses"])
+        body = self.asked()
+        self.assertEqual((body["model"], body["stream"], body["store"], body["max_output_tokens"]),
+                         ("gpt-6-luna", True, False, 4000))
         final = self.last_payload("editMessageText")
         self.assertEqual(final["message_id"], job.message_id)
         self.assertIn("Hello! <b>Here</b> you are.", final["text"])
@@ -72,11 +75,10 @@ class AnswerTests(StudioTestCase):
         self.say("My name is Amir")
         self.openai.answer = "Nice to meet you, Amir."
         self.say("What is my name?")
-        body = self.openai.sent("chat/completions")[-1]["json"]
-        self.assertEqual([m["role"] for m in body["messages"]],
-                         ["system", "user", "assistant", "user"])
-        self.assertEqual(body["messages"][1]["content"], "My name is Amir")
-        self.assertIn("Answer in the language the user writes in", body["messages"][0]["content"])
+        self.assertEqual(self.said(), [("user", "My name is Amir"),
+                                       ("assistant", "Hello! **Here** you are."),
+                                       ("user", "What is my name?")])
+        self.assertIn("Answer in the language the user writes in", self.asked()["instructions"])
         conversation = Conversation.objects.get()
         self.assertEqual(conversation.title, "My name is Amir")
         self.assertEqual(conversation.messages.count(), 4)
@@ -85,16 +87,15 @@ class AnswerTests(StudioTestCase):
     def test_only_the_last_messages_are_sent(self):
         for text in ("one", "two", "three"):
             self.say(text)
-        body = self.openai.sent("chat/completions")[-1]["json"]
-        self.assertEqual([m.get("content") for m in body["messages"][1:]],
+        self.assertEqual([text for _, text in self.said()],
                          ["two", self.openai.answer, "three"])
 
     def test_a_photo_with_a_question(self):
         self.send_photo("photo-9", caption="What breed is this?")
-        content = self.openai.sent("chat/completions")[-1]["json"]["messages"][1]["content"]
-        self.assertEqual(content[0]["type"], "image_url")
-        self.assertTrue(content[0]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
-        self.assertEqual(content[1], {"type": "text", "text": "What breed is this?"})
+        content = self.asked()["input"][0]["content"]
+        self.assertEqual(content[0]["type"], "input_image")
+        self.assertTrue(content[0]["image_url"].startswith("data:image/jpeg;base64,"))
+        self.assertEqual(content[1], {"type": "input_text", "text": "What breed is this?"})
         self.assertEqual(Message.objects.first().photos, ["photo-9"])
         moderated = self.openai.sent("moderations")[0]["json"]["input"]
         self.assertEqual([item["type"] for item in moderated], ["text", "image_url"])
@@ -103,12 +104,26 @@ class AnswerTests(StudioTestCase):
         self.send_photo()
         self.assertEqual(Message.objects.first().text, "What is in this photo?")
 
-    def test_only_the_newest_photo_is_sent_again(self):
+    def test_photos_stay_in_the_chat_for_follow_up_questions(self):
         self.send_photo("photo-1", caption="Look")
-        self.say("And now?")
-        messages = self.openai.sent("chat/completions")[-1]["json"]["messages"]
-        self.assertEqual(messages[1]["content"], "[photo] Look")
-        self.assertEqual(messages[3]["content"], "And now?")
+        self.say("And the colour?")
+        self.assertEqual(self.parts(message=0), ["input_image", "input_text"])
+        self.assertEqual(self.said()[-1], ("user", "And the colour?"))
+
+    @runtime.override(CHAT_CONTEXT_MESSAGES=1)
+    def test_a_photo_the_chat_no_longer_remembers_is_a_marker(self):
+        self.send_photo("photo-1", caption="Look")
+        self.say("One")
+        self.say("Two")
+        self.assertNotIn("input_image", [part for message in self.asked()["input"]
+                                         if isinstance(message["content"], list)
+                                         for part in [p["type"] for p in message["content"]]])
+
+    def test_a_model_switched_to_one_without_eyes_gets_a_marker(self):
+        self.send_photo("photo-1", caption="Look")
+        AIModel.objects.filter(model_id="gpt-6-luna").update(sees_images=False)
+        self.say("Still there?")
+        self.assertEqual(self.said()[0], ("user", "[photo] Look"))
 
     def test_a_model_that_cannot_see_photos_says_so(self):
         AIModel.objects.filter(model_id="gpt-6-luna").update(sees_images=False)
@@ -162,13 +177,13 @@ class AnswerTests(StudioTestCase):
         self.assertEqual(Job.objects.get().charged, 1)
 
     def test_a_failed_answer_costs_nothing_and_can_be_tried_again(self):
-        self.openai.fail["chat/completions"] = (500, "server error")
+        self.openai.fail["responses"] = (500, "server error")
         self.say("Hello?")
         job = Job.objects.get()
         self.assertEqual((job.status, self.balance()), (Status.FAILED, 500))
         self.assertIn("could not be made, so nothing was charged", self.last_text())
         self.assertEqual(self.buttons(), [f"out:retry:{job.pk}", "menu:new"])
-        del self.openai.fail["chat/completions"]
+        del self.openai.fail["responses"]
         self.tap(f"out:retry:{job.pk}", message_id=job.message_id)
         retried = Job.objects.exclude(pk=job.pk).get()
         self.assertEqual(retried.status, Status.DONE)
@@ -309,8 +324,7 @@ class ChatScreenTests(StudioTestCase):
         self.say("Remember: blue")
         self.tap("chat:new")
         self.say("What colour?")
-        body = self.openai.sent("chat/completions")[-1]["json"]
-        self.assertEqual(len(body["messages"]), 2)
+        self.assertEqual(len(self.said()), 1)
         self.assertEqual(Conversation.objects.count(), 2)
 
     def test_an_empty_chat_is_reused_not_piled_up(self):
@@ -366,7 +380,7 @@ class AssistantTests(StudioTestCase):
         self.assertIn("Assistant: 🌐 Translator", self.last_text())
         self.assertIn("Send the text, and say which language", self.last_text())
         self.say("Bonjour tout le monde")
-        system = self.openai.sent("chat/completions")[-1]["json"]["messages"][0]["content"]
+        system = self.asked()["instructions"]
         self.assertIn("Your role in this chat:\nYou are a professional translator.", system)
 
     def test_an_assistant_with_its_own_model(self):

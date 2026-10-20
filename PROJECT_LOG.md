@@ -50,6 +50,89 @@ touches one, update it in the same change.
 
 ## Changelog
 
+### 2026-10-20 — v0.2.0 — Read every kind of file, and an album as one message
+
+The owner: the bot must take "images, files, voices, PDFs… all kind of
+files which the API supports", and asked what happens with several files
+or photos at once. The plan sent (Requests, below) had files without a
+question wait as attachments with a Send button; the owner refused that:
+"just one message but contain many". So a message is one question, however
+many photos or files it carries, with no extra step.
+
+**Every file OpenAI reads.** Chat Completions reads only PDFs; OpenAI's
+Responses API reads PDFs (their text and page images), Word and other
+documents, PowerPoint, Excel/CSV (the first 1,000 rows a sheet), text and
+code (developers.openai.com, File inputs, read today). So OpenAI's chat
+moved to the Responses API (`/v1/responses`): `instructions` for the system
+text, `input` with `input_text`, `input_image` and `input_file` (the file
+as a data URL), `max_output_tokens`, and `store: false` (nothing kept at
+OpenAI). Its stream is read from `response.output_text.delta`, with the
+usage from `response.completed` or `response.incomplete` (cut at the
+longest answer); `response.failed` and `error` fail the request. The
+translator and the safety judge use it too. It also makes web search
+possible later.
+- Claude's models get PDFs as documents and text files as text documents;
+  other files are refused before anything is held ("Claude Haiku 5.5 cannot
+  read cv.docx. Choose another model").
+- A PDF needs a model that sees images (its pages are read as images too).
+- Images sent as files (JPEG, PNG, WebP, GIF) are photos.
+- Videos: "cannot be read yet"; anything else names the file and what the
+  AI reads.
+
+**Limits.** 20 MB a file (the most a bot can download from Telegram), 50 MB
+and 20 files a message (OpenAI's 50 MB a request). Said before anything is
+held.
+
+**An album is one message.** Telegram hands a bot an album (up to 10 photos
+or files sent as one message) as separate updates sharing a
+`media_group_id`, and never says which is the last. So each piece is kept
+(`AlbumItem`) and a check is queued 1.5 seconds after it; the check that
+finds no newer piece sends them all on as one message, with the album's
+caption as the question. The user sees nothing of this: one message, one
+answer. A message with one file goes on at once. Files and photos sent
+without a question get one in the user's language ("Summarize these
+files.", "What is in these photos?"), so the answer is in it too. The sweep
+forgets pieces whose check never ran.
+- Every photo and file message now goes through the background
+  (`flush_album`): a PDF is read there for its pages (`pypdf`, new
+  requirement), so the hold covers them without slowing the webhook.
+- Several voice notes or audio files in one album are heard together (one
+  request, priced by their total length) and answered as one message.
+- **Edit a photo** takes an album too: GPT Image gets every photo
+  (`image[]`), for "put this product in this scene"; the summary shows
+  "· 🖼 2".
+
+**Files stay in the chat.** The photos and files of the messages the chat
+remembers (Chat memory) go with every new message, newest first while they
+fit one request; older ones, and any the current model cannot read, become
+a marker ("[file: report.pdf]"). So "what does page 3 say?" works. They are
+fetched from Telegram each time: nothing is stored on the server. This
+replaces v0.1.0's "only the newest photo is sent again". A message keeps
+its files (`Message.files`: name, type, size, pages; migration studio
+0003).
+
+**The hold** counts what the chat carries: 1,600 tokens a photo, 1,800 a
+PDF page, three bytes a token for other files, on top of the chat's text
+and the longest answer. The charge is still what OpenAI says it used.
+
+**Safety.** Photos go through Moderation as before (one call a photo).
+Document text is not moderated here; the chat model's own safety reads it,
+as it reads any chat.
+
+**Archive.** Every file sent in is copied to the archive channel, like
+photos and voice notes.
+
+**Tests.** 484 (up from 456): PDFs with their pages and hold, text, code
+and Word files, images sent as files, unsupported files, videos, the 20 MB,
+20-file and 50 MB limits, Claude's documents and refusals, files kept in the
+chat and the oldest left out when they do not fit, the archive; albums of
+photos and of files, waiting for the last piece and going once, a bad file
+stopping the album, Edit a photo with an album, audio albums, stale pieces;
+the Responses API (request, stream, length limit, unfinished and failed
+streams) and Claude's documents.
+
+**After deploy.** Nothing to set up.
+
 ### 2026-10-20 — v0.1.0 — Start AIstars: AI chat, images and voice, paid with Stars
 
 The owner: a separate project, AIstars, where users get "chat, image creation

@@ -1,7 +1,8 @@
 """
-Images: Create an image from a description, or Edit a photo the user sends.
+Images: Create an image from a description, or Edit a photo the user sends
+(or several, sent as one album: "put this product in this scene").
 
-    description (and the photo) → the safety check → the summary: shape,
+    description (and the photos) → the safety check → the summary: shape,
     quality, the most it can cost → Create → made in the background → the
     image, with what it cost
 
@@ -103,10 +104,10 @@ def ask_photo(account, chat_id):
     ui.screen(account, chat_id, texts.ask_photo_text(), texts.cancel_keyboard("img:"))
 
 
-def got_photo(account, chat_id, file_id, draft=None):
-    """The photo to change: then what should change, unless that is known already."""
+def got_photos(account, chat_id, file_ids, draft=None):
+    """The photos to change: then what should change, unless that is known already."""
     draft = {k: v for k, v in (draft or {}).items() if k not in ("step", "screening")}
-    draft["photo"] = file_id
+    draft["photos"] = list(file_ids)
     if draft.get("prompt"):
         return got_prompt(account, chat_id, draft["prompt"], draft)
     state.wait(account, "edit_prompt", **draft)
@@ -115,7 +116,7 @@ def got_photo(account, chat_id, file_id, draft=None):
 
 
 def got_prompt(account, chat_id, text, draft):
-    base = {"size": "auto" if draft.get("photo") else DEFAULTS["size"],
+    base = {"size": "auto" if draft.get("photos") else DEFAULTS["size"],
             "quality": DEFAULTS["quality"]}
     draft = {**base, **{k: v for k, v in draft.items() if k not in ("step", "screening")},
              "prompt": text}
@@ -127,7 +128,7 @@ def set_option(account, chat_id, key, value):
     if not draft or draft.get("step") != "image_summary":
         show(account, chat_id)
         return menus.expired_button_text()
-    allowed = {"size": (("auto",) if draft.get("photo") else ()) + texts.SIZES,
+    allowed = {"size": (("auto",) if draft.get("photos") else ()) + texts.SIZES,
                "quality": texts.QUALITIES}[key]
     if value in allowed:
         draft[key] = value
@@ -137,21 +138,21 @@ def set_option(account, chat_id, key, value):
 
 def change_prompt(account, chat_id):
     draft = state.waiting(account) or {}
-    keep = {k: v for k, v in draft.items() if k in ("photo", "size", "quality")}
-    state.wait(account, "edit_prompt" if keep.get("photo") else "image_prompt", **keep)
-    ui.screen(account, chat_id, texts.ask_change_text() if keep.get("photo")
+    keep = {k: v for k, v in draft.items() if k in ("photos", "size", "quality")}
+    state.wait(account, "edit_prompt" if keep.get("photos") else "image_prompt", **keep)
+    ui.screen(account, chat_id, texts.ask_change_text() if keep.get("photos")
               else texts.ask_description_text(), texts.cancel_keyboard("img:"))
 
 
 def summary(account, chat_id, draft, fresh=False):
-    """Checked for safety once per description and photo, then priced."""
+    """Checked for safety once per description and photos, then priced."""
     show_screen = ui.fresh_screen if fresh else ui.screen
-    model = model_for(account, edit=bool(draft.get("photo")))
+    model = model_for(account, edit=bool(draft.get("photos")))
     if model is None:
         state.stop(account)
         return show_screen(account, chat_id, telegram.esc(texts.no_model_text()),
                            texts.cancel_keyboard("img:"))
-    photos = [draft["photo"]] if draft.get("photo") else []
+    photos = draft.get("photos") or []
     if not draft.get("screening"):
         screening = checks.screen(account, "edit" if photos else "image", model.model_id,
                                   draft["prompt"],
@@ -179,7 +180,7 @@ def go(account, chat_id):
     if not draft or draft.get("step") != "image_summary":
         show(account, chat_id)
         return menus.expired_button_text()
-    photos = [draft["photo"]] if draft.get("photo") else []
+    photos = draft.get("photos") or []
     model = model_for(account, edit=bool(photos))
     screening = Screening.objects.filter(pk=draft.get("screening"), account=account,
                                          result=Result.PASSED).first()
@@ -207,11 +208,11 @@ def go(account, chat_id):
 
 
 def again(account, chat_id, job):
-    """The same request once more: its description, photo and settings."""
+    """The same request once more: its description, photos and settings."""
     draft = {"prompt": job.prompt, "size": job.options.get("size", DEFAULTS["size"]),
              "quality": job.options.get("quality", DEFAULTS["quality"])}
     if job.photos:
-        draft["photo"] = job.photos[0]
+        draft["photos"] = list(job.photos)
     summary(account, chat_id, draft, fresh=True)
 
 
@@ -219,7 +220,7 @@ def edit_result(account, chat_id, job):
     """Change the image just made: it becomes the photo to edit."""
     if not job.result_file_id:
         return show(account, chat_id, fresh=True)
-    state.wait(account, "edit_prompt", photo=job.result_file_id)
+    state.wait(account, "edit_prompt", photos=[job.result_file_id])
     ui.fresh_screen(account, chat_id, texts.ask_change_text(), texts.cancel_keyboard("img:"))
     return None
 

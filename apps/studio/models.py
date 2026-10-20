@@ -88,6 +88,8 @@ class Message(models.Model):
     text = models.TextField(blank=True)
     # Telegram file_ids of the photos sent with it.
     photos = models.JSONField(default=list, blank=True)
+    # The files sent with it: [{"file_id", "name", "mime", "size", "pages"}].
+    files = models.JSONField(default=list, blank=True)
     voice = models.BooleanField(default=False, help_text="Typed from a voice note.")
     job = models.ForeignKey("Job", null=True, blank=True, on_delete=models.SET_NULL,
                             related_name="messages")
@@ -169,3 +171,26 @@ class Job(models.Model):
 
     def __str__(self):
         return f"#{self.pk} {self.get_kind_display()} ({self.get_status_display()})"
+
+
+class AlbumItem(models.Model):
+    """
+    One piece of a Telegram album. Telegram hands a bot an album (photos or
+    files sent as one message) as separate updates sharing a media_group_id;
+    the pieces wait here a moment, then go to the AI together, as the one
+    message the user sent.
+    """
+
+    account = models.ForeignKey("core.Account", on_delete=models.CASCADE, related_name="+")
+    group = models.CharField(max_length=64, db_index=True)
+    chat_id = models.BigIntegerField()
+    message_id = models.BigIntegerField()
+    caption = models.TextField(blank=True)
+    item = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("message_id",)
+
+    def __str__(self):
+        return f"{self.group} #{self.message_id}"

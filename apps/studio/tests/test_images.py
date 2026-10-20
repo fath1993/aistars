@@ -30,7 +30,7 @@ class CreateTests(StudioTestCase):
 
     def test_a_description_is_checked_then_priced(self):
         self.describe()
-        self.assertEqual(self.openai.paths(), ["moderations", "chat/completions"])
+        self.assertEqual(self.openai.paths(), ["moderations", "responses"])
         screening = Screening.objects.get()
         self.assertEqual((screening.tool, screening.result), ("image", Result.PASSED))
         self.assertEqual(list(screening.checks.values_list("layer", flat=True)),
@@ -129,7 +129,7 @@ class CreateTests(StudioTestCase):
         self.assertIn("This is not allowed: a real person.", self.last_text())
 
     def test_without_a_judge_nothing_is_made(self):
-        self.openai.fail["chat/completions"] = (500, "down")
+        self.openai.fail["responses"] = (500, "down")
         self.describe()
         self.assertIn("could not be checked right now", self.last_text())
         self.assertEqual(Account.objects.get(pk=self.account.pk).strikes, 0)
@@ -185,7 +185,8 @@ class EditTests(StudioTestCase):
     def test_a_photo_is_changed(self):
         self.tap("img:")
         self.tap("img:edit")
-        self.assertIn("Send the photo you want to change.", self.last_text())
+        self.assertIn("Send the photo you want to change, or several photos as one album.",
+                      self.last_text())
         self.send_photo("photo-7")
         self.assertIn("What should change?", self.last_text())
         self.say("Make it night time")

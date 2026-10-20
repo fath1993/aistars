@@ -25,8 +25,11 @@ class FakeResponse:
 
 ANTHROPIC_OK = {"content": [{"type": "text", "text": "Bonjour"}],
                 "usage": {"input_tokens": 1000, "output_tokens": 200}}
-OPENAI_OK = {"choices": [{"message": {"content": "Bonjour"}}],
-             "usage": {"prompt_tokens": 1000, "completion_tokens": 200}}
+OPENAI_OK = {"status": "completed", "output": [
+    {"type": "reasoning", "summary": []},
+    {"type": "message", "role": "assistant",
+     "content": [{"type": "output_text", "text": "Bonjour"}]}],
+    "usage": {"input_tokens": 1000, "output_tokens": 200}}
 
 
 class ClientTests(TestCase):
@@ -51,10 +54,12 @@ class ClientTests(TestCase):
 
     def test_openai_request_and_answer(self):
         reply, call = self.ask(self.luna, FakeResponse(OPENAI_OK))
-        self.assertEqual(call.args[0], "https://api.openai.com/v1/chat/completions")
+        self.assertEqual(call.args[0], "https://api.openai.com/v1/responses")
         self.assertEqual(call.kwargs["headers"]["Authorization"], "Bearer sk-test")
-        self.assertEqual(call.kwargs["json"]["messages"][0],
-                         {"role": "system", "content": "be brief"})
+        body = call.kwargs["json"]
+        self.assertEqual((body["instructions"], body["store"]), ("be brief", False))
+        self.assertEqual(body["input"], [{"role": "user", "content": [
+            {"type": "input_text", "text": "Hello"}]}])
         self.assertEqual(reply.text, "Bonjour")
 
     def test_the_cost_is_priced_recorded_and_logged(self):
@@ -97,7 +102,7 @@ class ClientTests(TestCase):
         Provider.objects.filter(kind="openai").update(base_url="https://proxy.example.com/")
         self.luna.refresh_from_db()
         _, call = self.ask(self.luna, FakeResponse(OPENAI_OK))
-        self.assertEqual(call.args[0], "https://proxy.example.com/v1/chat/completions")
+        self.assertEqual(call.args[0], "https://proxy.example.com/v1/responses")
 
 
 class ModelTests(TestCase):
@@ -210,10 +215,10 @@ class ImageTests(TestCase):
         self.assertEqual(content[1], {"type": "text", "text": "Is this fine?"})
 
     def test_openai_gets_a_data_url(self):
-        content = self.sent("gpt-6-luna", OPENAI_OK)["messages"][1]["content"]
-        self.assertEqual(content[0], {"type": "image_url",
-                                      "image_url": {"url": "data:image/jpeg;base64,/9hqcGVn"}})
-        self.assertEqual(content[1]["text"], "Is this fine?")
+        content = self.sent("gpt-6-luna", OPENAI_OK)["input"][0]["content"]
+        self.assertEqual(content[0], {"type": "input_image",
+                                      "image_url": "data:image/jpeg;base64,/9hqcGVn"})
+        self.assertEqual(content[1], {"type": "input_text", "text": "Is this fine?"})
 
     def test_one_default_for_safety(self):
         self.assertEqual(AIModel.safety_default().model_id, "gpt-6-luna")
@@ -246,12 +251,19 @@ class FakeStream:
                 event if isinstance(event, str) else "data: " + json.dumps(event))
 
 
-def openai_chunk(text="", finish=None, usage=None):
-    chunk = {"choices": [{"delta": {"content": text}, "finish_reason": finish}] if text or finish
-             else []}
-    if usage:
-        chunk["usage"] = usage
-    return chunk
+def openai_events(*pieces, finish="completed", usage=None):
+    """A Responses API stream: the text in pieces, then how it ended."""
+    usage = usage or {"input_tokens": 1000, "output_tokens": 200}
+    events = [{"type": "response.created", "response": {"status": "in_progress"}}, None]
+    events += [{"type": "response.output_text.delta", "delta": piece} for piece in pieces]
+    if finish == "length":
+        events.append({"type": "response.incomplete", "response": {
+            "status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"},
+            "usage": usage}})
+    else:
+        events.append({"type": "response.completed",
+                       "response": {"status": "completed", "usage": usage}})
+    return events
 
 
 class ChatStreamTests(TestCase):
@@ -266,32 +278,67 @@ class ChatStreamTests(TestCase):
             reply = clients.chat(model, "be brief", messages or [
                 {"role": "user", "text": "Hi", "images": []},
                 {"role": "assistant", "text": "Hello!", "images": []},
-                {"role": "user", "text": "Say salut", "images": [(b"\xff\xd8jpeg", "image/jpeg")]},
+                {"role": "user", "text": "Say salut", "images": [(b"\xff\xd8jpeg", "image/jpeg")],
+                 "files": [{"name": "notes.pdf", "media_type": "application/pdf",
+                            "data": b"%PDF-1.7"}]},
             ], purpose="chat", on_text=seen.append)
         return reply, seen, post.call_args
 
     def test_openai_streams_and_counts_the_tokens(self):
-        reply, seen, call = self.chat(self.luna, FakeStream([
-            openai_chunk("Sa"), None, ": keep-alive", openai_chunk("lut ✨"),
-            openai_chunk(finish="stop"),
-            openai_chunk(usage={"prompt_tokens": 1000, "completion_tokens": 200}), "data: [DONE]"]))
+        reply, seen, call = self.chat(self.luna, FakeStream(openai_events("Sa", "lut ✨")))
         self.assertEqual((reply.text, reply.input_tokens, reply.output_tokens, reply.cut_off),
                          ("Salut ✨", 1000, 200, False))
         self.assertEqual(seen, ["Sa", "Salut ✨"])
         self.assertEqual(reply.cost_micros, 200)
+        self.assertEqual(call.args[0], "https://api.openai.com/v1/responses")
         body = call.kwargs["json"]
-        self.assertEqual((body["stream"], body["stream_options"]), (True, {"include_usage": True}))
-        self.assertEqual(body["max_completion_tokens"], 4000)
-        self.assertEqual([m["role"] for m in body["messages"]],
-                         ["system", "user", "assistant", "user"])
-        self.assertEqual(body["messages"][3]["content"][0]["image_url"]["url"],
-                         "data:image/jpeg;base64,/9hqcGVn")
+        self.assertEqual((body["stream"], body["store"], body["max_output_tokens"],
+                          body["instructions"]), (True, False, 4000, "be brief"))
+        self.assertEqual([m["role"] for m in body["input"]], ["user", "assistant", "user"])
+        self.assertEqual(body["input"][1]["content"], "Hello!")
+        file, image, text = body["input"][2]["content"]
+        self.assertEqual(file, {"type": "input_file", "filename": "notes.pdf",
+                                "file_data": "data:application/pdf;base64,JVBERi0xLjc="})
+        self.assertEqual(image, {"type": "input_image",
+                                 "image_url": "data:image/jpeg;base64,/9hqcGVn"})
+        self.assertEqual(text, {"type": "input_text", "text": "Say salut"})
         self.assertEqual(budget.spent_today()["cost"], 200)
 
     def test_an_answer_at_the_length_limit_is_marked(self):
-        reply, _, _ = self.chat(self.luna, FakeStream([
-            openai_chunk("Long"), openai_chunk(finish="length")]))
+        reply, _, _ = self.chat(self.luna, FakeStream(openai_events("Long", finish="length")))
         self.assertTrue(reply.cut_off)
+
+    def test_a_stream_that_never_finishes_is_an_error(self):
+        events = openai_events("Half")[:-1]
+        with self.assertRaisesMessage(clients.AIError, "stopped before it was complete"):
+            self.chat(self.luna, FakeStream(events))
+
+    def test_a_failed_answer_is_explained(self):
+        failed = [{"type": "response.failed",
+                   "response": {"status": "failed", "error": {"message": "overloaded"}}}]
+        with self.assertRaisesMessage(clients.AIError, "the answer failed: overloaded"):
+            self.chat(self.luna, FakeStream(failed))
+
+    def test_anthropic_reads_pdfs_and_text_files_as_documents(self):
+        _, _, call = self.chat(self.haiku, FakeStream([
+            {"type": "message_start", "message": {"usage": {"input_tokens": 10}}},
+            {"type": "message_delta", "usage": {"output_tokens": 2}}]), messages=[
+            {"role": "user", "text": "Compare", "images": [], "files": [
+                {"name": "a.pdf", "media_type": "application/pdf", "data": b"%PDF-1.7"},
+                {"name": "b.md", "media_type": "text/markdown", "data": "# Ünïcode".encode()}]}])
+        pdf, text, question = call.kwargs["json"]["messages"][0]["content"]
+        self.assertEqual(pdf, {"type": "document", "title": "a.pdf", "source": {
+            "type": "base64", "media_type": "application/pdf", "data": "JVBERi0xLjc="}})
+        self.assertEqual(text, {"type": "document", "title": "b.md", "source": {
+            "type": "text", "media_type": "text/plain", "data": "# Ünïcode"}})
+        self.assertEqual(question, {"type": "text", "text": "Compare"})
+
+    def test_anthropic_refuses_what_is_not_text(self):
+        with self.assertRaisesMessage(clients.AIError, "is not plain text"):
+            self.chat(self.haiku, FakeStream([]), messages=[
+                {"role": "user", "text": "Read", "images": [], "files": [
+                    {"name": "x.docx", "media_type": "application/msword",
+                     "data": b"PK\x03\x04\xff\xfe"}]}])
 
     def test_anthropic_streams_too(self):
         reply, seen, call = self.chat(self.haiku, FakeStream([

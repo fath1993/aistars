@@ -23,5 +23,5 @@ phonenumbers==9.0.41
 # Safety checks: photos are shrunk in memory before they are judged
 Pillow==12.3.0
 
-# The model catalog: each model's input schema, from Higgsfield's docs
-jsonschema==4.26.0
+# PDFs sent to the chat: their pages, for the hold
+pypdf==6.21.1

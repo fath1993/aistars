@@ -29,6 +29,20 @@ from apps.core.tests.helpers import (
 _ids = itertools.count(5000)
 
 
+def pdf(pages) -> bytes:
+    """A real PDF of `pages` blank pages."""
+    import io
+
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    for _ in range(pages):
+        writer.add_blank_page(width=200, height=200)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
 class Response:
     """A requests response: JSON, bytes, or a server-sent event stream."""
 
@@ -63,7 +77,7 @@ class FakeOpenAI:
     def __init__(self):
         self.calls = []
         self.answer = "Hello! **Here** you are."
-        self.usage = {"prompt_tokens": 1000, "completion_tokens": 200}
+        self.usage = {"input_tokens": 1000, "output_tokens": 200}
         self.finish = "stop"
         self.flag = {}
         self.judge = '{"verdict": "allow", "category": "none", "reason": "fine"}'
@@ -88,17 +102,26 @@ class FakeOpenAI:
                             status=400 if status == 451 else status)
         if path == "moderations":
             return Response({"results": [{"flagged": bool(self.flag), "categories": self.flag}]})
-        if path == "chat/completions":
-            if kwargs.get("stream"):
+        if path == "responses":
+            if kwargs["json"].get("stream"):
                 words = [self.answer[i:i + 7] for i in range(0, len(self.answer), 7)]
-                events = [{"choices": [{"delta": {"content": piece}, "finish_reason": None}]}
-                          for piece in words]
-                events.append({"choices": [{"delta": {}, "finish_reason": self.finish}]})
-                events.append({"choices": [], "usage": self.usage})
+                events = [{"type": "response.created", "response": {"status": "in_progress"}}]
+                events += [{"type": "response.output_text.delta", "delta": piece}
+                           for piece in words]
+                if self.finish == "length":
+                    events.append({"type": "response.incomplete", "response": {
+                        "status": "incomplete", "usage": self.usage,
+                        "incomplete_details": {"reason": "max_output_tokens"}}})
+                else:
+                    events.append({"type": "response.completed", "response": {
+                        "status": "completed", "usage": self.usage}})
                 return Response(events=events)
             # The safety judge (and translation): one answer.
-            return Response({"choices": [{"message": {"content": self.judge}}],
-                             "usage": {"prompt_tokens": 800, "completion_tokens": 30}})
+            return Response({"status": "completed", "output": [
+                {"type": "reasoning", "summary": []},
+                {"type": "message", "role": "assistant",
+                 "content": [{"type": "output_text", "text": self.judge}]}],
+                "usage": {"input_tokens": 800, "output_tokens": 30}})
         if path in ("images/generations", "images/edits"):
             return Response({"data": [{"b64_json": base64.b64encode(b"PNG-image").decode()}],
                              "usage": self.image_usage})
@@ -141,7 +164,15 @@ class StudioTestCase(TestCase):
     def download(self, file_id):
         from apps.safety.tests.test_checks import jpeg
 
-        return b"OggS-voice" if file_id.startswith("voice") else jpeg()
+        if file_id.startswith(("voice", "audio")):
+            return b"OggS-voice"
+        if file_id.startswith("pdf"):
+            return pdf(3)
+        if file_id.startswith("doc"):
+            return b"PK\x03\x04 a Word file"
+        if file_id.startswith("text"):
+            return "Notes: ünïcode".encode()
+        return jpeg()
 
     # ---- the user ----------------------------------------------------------
 
@@ -156,6 +187,44 @@ class StudioTestCase(TestCase):
         if caption:
             message["caption"] = caption
         post_update(update)
+
+    def send_document(self, file_id="pdf-1", name="report.pdf", mime="application/pdf",
+                      size=200_000, caption="", album=None):
+        update = message_update("")
+        message = update["message"]
+        message.pop("text")
+        message["document"] = {"file_id": file_id, "file_name": name, "mime_type": mime,
+                               "file_size": size}
+        if caption:
+            message["caption"] = caption
+        if album:
+            message["media_group_id"] = album
+        post_update(update)
+
+    def send_album(self, *pieces, album="album-1"):
+        """
+        An album: ("photo", file_id, caption) or ("document", file_id, name,
+        caption[, mime]).
+        """
+        for piece in pieces:
+            if piece[0] == "photo":
+                update = message_update("")
+                message = update["message"]
+                message.pop("text")
+                message["photo"] = [{"file_id": piece[1], "file_size": 90_000}]
+                message["media_group_id"] = album
+                if piece[2]:
+                    message["caption"] = piece[2]
+                post_update(update)
+            else:
+                mime = piece[4] if len(piece) > 4 else "application/pdf"
+                self.send_document(piece[1], piece[2], mime=mime, caption=piece[3], album=album)
+
+    def flush(self, album="album-1"):
+        """The album's last check: no newer piece came."""
+        from apps.studio import album as albums
+
+        return albums.flush(self.account.pk, f"{self.account.pk}:{album}", quiet=0)
 
     def send_voice(self, file_id="voice-1", seconds=12, kind="voice"):
         update = message_update("")
@@ -193,3 +262,22 @@ class StudioTestCase(TestCase):
 
     def balance(self):
         return ledger.balance(self.account)
+
+    def asked(self, number=-1):
+        """The number-th chat request OpenAI got: its instructions and its input."""
+        return self.openai.sent("responses")[number]["json"]
+
+    def said(self, number=-1):
+        """[(role, text)] of a chat request, files and photos left out."""
+        said = []
+        for message in self.asked(number)["input"]:
+            content = message["content"]
+            text = content if isinstance(content, str) else "".join(
+                part["text"] for part in content if part["type"] == "input_text")
+            said.append((message["role"], text))
+        return said
+
+    def parts(self, number=-1, message=-1):
+        """The kinds of the parts of one message of a chat request."""
+        content = self.asked(number)["input"][message]["content"]
+        return [part["type"] for part in content]

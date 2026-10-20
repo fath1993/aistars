@@ -134,7 +134,8 @@ def chat_text(conversation, model, count) -> str:
         lines.append(esc(catalog.tr(conversation.assistant.first_message)
                          or _("Type your message.")))
     else:
-        lines.append(esc(_("Type a message, send a photo with a question, or a voice note.")))
+        lines.append(esc(_("Type a message, or send photos, files or a voice note, with a "
+                           "question as their caption.")))
     return "\n".join(lines)
 
 
@@ -314,8 +315,29 @@ def refused_text() -> str:
                         "charged."))
 
 
-def files_text() -> str:
-    return _("Photos, voice notes and audio files work here. Other files are coming soon.")
+def file_problem_text(what, name, model) -> str:
+    """Why a photo or file cannot go to the AI (files.problem)."""
+    if what == "no_photos":
+        return no_photos_text(model)
+    if what == "too_big":
+        return _("%(name)s is over 20 MB, the most a bot can download from Telegram.") % {
+            "name": name}
+    if what == "cannot_read":
+        return _("%(model)s cannot read %(name)s. Choose another model under 🤖 Model.") % {
+            "model": model, "name": name}
+    if name in ("video", "animation", "video_note", "sticker"):
+        return _("Videos cannot be read yet. The AI reads photos, PDFs, Word, Excel, "
+                 "PowerPoint, text and code files.")
+    return _("%(name)s cannot be read. The AI reads photos, PDFs, Word, Excel, PowerPoint, "
+             "text and code files.") % {"name": name}
+
+
+def too_many_files_text(limit) -> str:
+    return _("That is more than %(limit)s files for one message.") % {"limit": limit}
+
+
+def files_too_big_text() -> str:
+    return _("These files are over 50 MB together, the most for one message.")
 
 
 # --------------------------------------------------------------------------
@@ -385,7 +407,8 @@ def ask_description_text() -> str:
 
 
 def ask_photo_text() -> str:
-    return f"🖌 {_bold(_('Edit a photo'))}\n\n" + esc(_("Send the photo you want to change."))
+    return f"🖌 {_bold(_('Edit a photo'))}\n\n" + esc(
+        _("Send the photo you want to change, or several photos as one album."))
 
 
 def ask_change_text() -> str:
@@ -398,7 +421,10 @@ def cancel_keyboard(back):
 
 
 def image_summary_text(draft, model, hold, balance) -> str:
-    title = _("Your photo edit") if draft.get("photo") else _("Your image")
+    photos = len(draft.get("photos") or [])
+    title = _("Your photo edit") if photos else _("Your image")
+    if photos > 1:
+        title += f" · 🖼 {photos}"
     lines = [f"🎨 {_bold(title)}", "", f"<i>{esc(draft['prompt'])}</i>", "",
              f"{esc(_('Shape'))}: {esc(size_name(draft['size']))} · "
              f"{esc(_('Quality'))}: {esc(quality_name(draft['quality']))}",
@@ -407,7 +433,7 @@ def image_summary_text(draft, model, hold, balance) -> str:
 
 
 def image_summary_keyboard(draft, hold, enough):
-    sizes = (("auto",) if draft.get("photo") else ()) + SIZES
+    sizes = (("auto",) if draft.get("photos") else ()) + SIZES
     shapes = [{"text": _tick(size == draft["size"], size_name(size)),
                "callback_data": f"img:size:{size}"} for size in sizes]
     # Three shapes fit a row; with "As the photo", two rows of two.
@@ -415,7 +441,7 @@ def image_summary_keyboard(draft, hold, enough):
     rows.append([{"text": _tick(quality == draft["quality"], quality_name(quality)),
                   "callback_data": f"img:quality:{quality}"} for quality in QUALITIES])
     if enough:
-        label = _("Edit it") if draft.get("photo") else _("Create it")
+        label = _("Edit it") if draft.get("photos") else _("Create it")
         rows.append([{"text": f"✅ {label} · {coins(hold)}", "callback_data": "img:go"}])
     else:
         rows.append([{"text": "⭐ " + _("Buy credits"), "callback_data": "credits:buy"}])

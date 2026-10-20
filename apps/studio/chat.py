@@ -23,7 +23,7 @@ from apps.safety import checks
 from apps.safety.models import Result
 from apps.safety.texts import category_text
 
-from . import archive, demo, formatting, jobs, texts
+from . import archive, demo, files, formatting, jobs, texts
 from .models import ACTIVE, Conversation, Job, Kind, Message, Profile, Role
 
 SYSTEM = """\
@@ -32,14 +32,14 @@ Answer in the language the user writes in, unless they ask for another.
 Telegram shows **bold**, *italic*, `code`, ``` code blocks ``` and [links](https://example.com),
 but not tables or HTML: use short lists instead of tables.
 Be helpful and to the point; write long answers only when they are asked for or needed.
-You cannot browse the web, open files other than photos, or see other chats."""
+Photos and files the user sent in this chat come with their messages.
+You cannot browse the web or see other chats."""
 
 ROLE = "\n\nYour role in this chat:\n{instructions}"
 
 # A rough count, on the safe side: tokens are fewer than characters ÷ 2.5 in
-# most languages, and a photo is read as at most about 1,600 tokens.
+# most languages (photos and files: files.tokens).
 CHARS_PER_TOKEN = 2.5
-PHOTO_TOKENS = 1600
 # An everyday answer, for the price shown next to each model.
 TYPICAL = (1500, 700)
 # How often an answer being written is shown (Telegram allows about one edit
@@ -132,17 +132,33 @@ def history(conversation, upto=None) -> list:
     return list(rows[:limit])[::-1]
 
 
-def estimate(model, conversation, text, photos) -> int:
-    """The most an answer can cost, in micro-USD."""
+def attachments_of(message) -> list:
+    """A message's photos and files, as items (files.py)."""
+    return [{"kind": "photo", "file_id": file_id} for file_id in message.photos or []] + [
+        {**item, "kind": "document"} for item in message.files or []]
+
+
+def estimate(model, conversation, text, attachments) -> int:
+    """
+    The most an answer can cost, in micro-USD: the chat so far with every
+    photo and file it still carries, the new message and its files, and the
+    model's longest answer.
+    """
+    rows = history(conversation)
     chars = len(system_prompt(conversation)) + len(text) + sum(
-        len(message.text) for message in history(conversation))
-    tokens_in = int(chars / CHARS_PER_TOKEN) + PHOTO_TOKENS * len(photos)
+        len(message.text) for message in rows)
+    carried = [item for message in rows for item in attachments_of(message)]
+    tokens_in = int(chars / CHARS_PER_TOKEN) + sum(
+        files.tokens(item) for item in carried + list(attachments))
     return model.cost_micros(tokens_in, model.max_output_tokens)
 
 
-def send(account, chat_id, text, photos=(), voice=False, conversation=None):
-    """A message from the user: checked, priced and held, then answered in the background."""
-    photos = list(photos)
+def send(account, chat_id, text, attachments=(), voice=False, conversation=None):
+    """
+    A message from the user, with its photos and files: checked, priced and
+    held, then answered in the background.
+    """
+    attachments = list(attachments)
     limit = int(runtime.get("CHAT_MAX_MESSAGE_CHARS"))
     if len(text) > limit:
         return _notice(chat_id, texts.too_long_text(limit))
@@ -153,12 +169,16 @@ def send(account, chat_id, text, photos=(), voice=False, conversation=None):
     if conversation.model_id != model.pk:
         Conversation.objects.filter(pk=conversation.pk).update(model=model)
         conversation.model = model
-    if photos and not model.sees_images:
-        return _notice(chat_id, texts.no_photos_text(model))
+    refused = _refused(model, attachments)
+    if refused:
+        return _notice(chat_id, refused)
     if Job.objects.filter(conversation=conversation, kind=Kind.CHAT,
                           status__in=ACTIVE).exists():
         return _notice(chat_id, texts.busy_text())
 
+    photos = [item["file_id"] for item in attachments if item["kind"] == "photo"]
+    documents = [{key: item.get(key) for key in ("file_id", "name", "mime", "size", "pages")}
+                 for item in attachments if item["kind"] == "document"]
     screening = checks.screen(account, "chat", model.model_id, text,
                               photos=[{"file_id": file_id, "kind": "photo"} for file_id in photos],
                               demo=jobs.demo())
@@ -166,7 +186,7 @@ def send(account, chat_id, text, photos=(), voice=False, conversation=None):
         return None
     try:
         job = jobs.start(account, chat_id, Kind.CHAT, model,
-                         estimate(model, conversation, text, photos),
+                         estimate(model, conversation, text, attachments),
                          conversation=conversation, prompt=text, photos=photos,
                          screening=screening)
     except jobs.NotEnough as exc:
@@ -175,12 +195,27 @@ def send(account, chat_id, text, photos=(), voice=False, conversation=None):
     except jobs.TooMany:
         return _notice(chat_id, texts.too_many_text())
     Message.objects.create(conversation=conversation, role=Role.USER, text=text, photos=photos,
-                           voice=voice, job=job)
+                           files=documents, voice=voice, job=job)
     jobs.touch_conversation(conversation)
     for file_id in photos:
         archive.copy_input(job, "photo", file_id)
+    for item in documents:
+        archive.copy_input(job, "document", item["file_id"])
     _begin(job)
     return job
+
+
+def _refused(model, attachments) -> str:
+    """Why these photos and files cannot go with this message, or ''."""
+    for item in attachments:
+        what, name = files.problem(item, model)
+        if what:
+            return texts.file_problem_text(what, name, model)
+    if len(attachments) > files.MAX_ITEMS:
+        return texts.too_many_files_text(files.MAX_ITEMS)
+    if sum(files.size(item) for item in attachments) > files.MAX_REQUEST:
+        return texts.files_too_big_text()
+    return ""
 
 
 def retry(account, chat_id, failed_job):
@@ -197,8 +232,7 @@ def retry(account, chat_id, failed_job):
                           status__in=ACTIVE).exists():
         return _notice(chat_id, texts.busy_text())
     try:
-        job = jobs.start(account, chat_id, Kind.CHAT, model,
-                         estimate(model, conversation, "", message.photos),
+        job = jobs.start(account, chat_id, Kind.CHAT, model, estimate(model, conversation, "", []),
                          conversation=conversation, prompt=message.text, photos=message.photos,
                          screening=failed_job.screening)
     except jobs.NotEnough as exc:
@@ -266,7 +300,7 @@ class Writer:
 def answer(job):
     conversation = job.conversation
     question = Message.objects.filter(job=job, role=Role.USER).first()
-    messages = _context(conversation, question)
+    messages = _context(conversation, question, job.model)
     if job.demo:
         reply = demo.chat_reply(job, Writer(job))
     else:
@@ -282,33 +316,40 @@ def answer(job):
     _write(job, reply, balance)
 
 
-def _context(conversation, question) -> list:
-    """The chat for the API: roles alternate, and only the newest photos are sent."""
+def _context(conversation, question, model) -> list:
+    """
+    The chat for the API: roles alternate, and the photos and files of the
+    messages it remembers go with them, newest first while they fit one
+    request (files.MAX_ITEMS, files.MAX_REQUEST); older ones become a marker.
+    """
     rows = history(conversation, upto=question.pk if question else None)
+    carried, count, size = set(), 0, 0
+    for message in reversed(rows):
+        if message.role != Role.USER:
+            continue
+        for index, item in enumerate(attachments_of(message)):
+            fits = count < files.MAX_ITEMS and size + files.size(item) <= files.MAX_REQUEST
+            if fits and not files.problem(item, model)[0]:
+                carried.add((message.pk, index))
+                count, size = count + 1, size + files.size(item)
     messages = []
     for message in rows:
-        text = message.text
-        images = []
-        if message.photos:
-            if question is not None and message.pk == question.pk:
-                images = [(_photo(file_id), "image/jpeg") for file_id in message.photos]
+        text, images, documents = message.text, [], []
+        for index, item in enumerate(attachments_of(message)):
+            if (message.pk, index) not in carried:
+                text = f"{files.marker(item)} {text}".strip()
+            elif item["kind"] == "photo":
+                images.append((files.load_photo(item["file_id"]), "image/jpeg"))
             else:
-                text = f"[{_('photo')}] {text}".strip()
+                documents.append(files.load_file(item))
         if messages and messages[-1]["role"] == message.role:
             messages[-1]["text"] += "\n\n" + text
             messages[-1]["images"] += images
+            messages[-1]["files"] += documents
         else:
-            messages.append({"role": message.role, "text": text or "…", "images": images})
+            messages.append({"role": message.role, "text": text or "…", "images": images,
+                             "files": documents})
     return messages
-
-
-def _photo(file_id) -> bytes:
-    from apps.safety import images
-
-    try:
-        return images.prepare(file_id)
-    except ValueError as exc:
-        raise clients.AIError(f"the photo could not be read: {exc}") from None
 
 
 def _write(job, reply, balance):
