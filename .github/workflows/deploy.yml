@@ -1,0 +1,90 @@
+# Test every push to main, then deploy the exact commit that passed.
+#
+# Deploy needs three repository secrets (Settings → Secrets and variables →
+# Actions); deploy/README.md has the one-time setup:
+#
+#   DEPLOY_HOST          server IP
+#   DEPLOY_SSH_KEY       private key whose public half is in root's
+#                        authorized_keys, locked to deploy/ci-deploy.sh
+#   DEPLOY_KNOWN_HOSTS   the server's host key line, so the connection is
+#                        verified instead of trusted on first use
+
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+  # The "Run workflow" button: redeploy main without a new commit.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install requirements
+        run: pip install -r requirements.txt
+
+      # A model change without its migration would deploy and then fail at
+      # migrate on the server.
+      - name: No missing migrations
+        run: python manage.py makemigrations --check --dry-run --settings=aistars.c_settings.test
+
+      - name: Run the test suite
+        run: python manage.py test --settings=aistars.c_settings.test
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # One deploy at a time. A newer push waits for the running deploy rather
+    # than cancelling it halfway through a migration.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - name: Check the deploy secrets are set
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          missing=""
+          [ -n "$HOST" ] || missing="$missing DEPLOY_HOST"
+          [ -n "$SSH_KEY" ] || missing="$missing DEPLOY_SSH_KEY"
+          [ -n "$KNOWN_HOSTS" ] || missing="$missing DEPLOY_KNOWN_HOSTS"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing. See deploy/README.md, 'Automatic deploys'."
+            exit 1
+          fi
+
+      - name: Deploy this commit over SSH
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+          # The server ignores any command but a commit ID: the key is locked
+          # to deploy/ci-deploy.sh, which runs dp.sh on exactly this commit.
+          ssh -i ~/.ssh/deploy_key \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              "root@$HOST" "$GITHUB_SHA"

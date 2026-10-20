@@ -1,0 +1,121 @@
+# Project name pinned so container, volume and network names do not change if
+# the checkout is renamed or two copies exist on one host.
+name: aistars
+
+services:
+  aistars-db:
+    image: postgres:16
+    env_file:
+      - aistars/.env
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    networks: [aistars-net]
+    # No published port: reachable only inside aistars-net.
+    restart: always
+
+  aistars-redis:
+    image: redis:7
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks: [aistars-net]
+    restart: always
+
+  pgadmin:
+    image: dpage/pgadmin4
+    restart: always
+    env_file:
+      - aistars/.env
+    ports:
+      - "127.0.0.1:${AIS_PGADMIN_PORT:-8131}:80"
+    networks: [aistars-net]
+    depends_on:
+      - aistars-db
+
+  aistars:
+    image: aistars:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DJANGO_SETTINGS_MODULE: aistars.c_settings.prod
+      STATIC_ROOT: /app/static
+    volumes:
+      # Only collectstatic's output, which nginx serves. There is no media
+      # directory: files live in Telegram (and its archive channel).
+      - /var/www/aistars/static:/app/static
+    env_file:
+      - aistars/.env
+    networks: [aistars-net]
+    depends_on:
+      - aistars-db
+      - aistars-redis
+    restart: always
+
+  # The project's own front door. Cloudflare does HTTPS; the server's edge
+  # proxy (Traefik, port 80) routes the domain below to this container; this
+  # nginx serves static files and proxies the rest to the app. Its config lives
+  # in the repo, so nothing on the host needs editing for this project.
+  nginx:
+    image: nginx:stable-alpine
+    volumes:
+      - ./deploy/nginx/aistars.conf:/etc/nginx/conf.d/default.conf:ro
+      - /var/www/aistars/static:/static:ro
+    networks: [aistars-net]
+    depends_on:
+      - aistars
+    restart: always
+    labels:
+      # Routing for the edge. Entry point `web` is the edge's contract: plain
+      # HTTP, since Cloudflare does HTTPS. The domain must match ALLOWED_HOSTS
+      # in aistars/.env (a test checks it).
+      - traefik.enable=true
+      - traefik.docker.network=aistars-net
+      - traefik.http.routers.aistars.rule=Host(`aistars.myshortclip.com`)
+      - traefik.http.routers.aistars.entrypoints=web
+      - traefik.http.services.aistars.loadbalancer.server.port=80
+
+  celery:
+    image: aistars:latest
+    # Its own build context, so `up --build` rebuilds it and the worker never
+    # runs code older than the web container.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A aistars worker -Q default --loglevel=info --concurrency=8
+    environment:
+      DJANGO_SETTINGS_MODULE: aistars.c_settings.prod
+    env_file:
+      - aistars/.env
+    networks: [aistars-net]
+    depends_on:
+      - aistars-db
+      - aistars-redis
+    restart: always
+
+  celery-beat:
+    image: aistars:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A aistars beat --loglevel=info --schedule=/app/celery-beat-schedule/celerybeat-schedule
+    environment:
+      DJANGO_SETTINGS_MODULE: aistars.c_settings.prod
+    volumes:
+      - /var/www/aistars/celery-beat-schedule:/app/celery-beat-schedule
+    env_file:
+      - aistars/.env
+    networks: [aistars-net]
+    depends_on:
+      - aistars-db
+      - aistars-redis
+    restart: always
+
+networks:
+  aistars-net:
+    name: aistars-net
+    driver: bridge
+
+volumes:
+  pg-data:
+  redis-data:

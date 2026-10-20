@@ -1,0 +1,33 @@
+.git
+.gitignore
+.gitattributes
+
+__pycache__/
+*.py[cod]
+
+*.sqlite3
+
+# Secrets reach the containers through env_file, never through the image.
+# `**/` matters: the file is aistars/.env, and a bare `.env` pattern only
+# matches at the root of the build context.
+**/.env
+**/.env.*
+!**/.env.example
+
+.idea/
+.vscode/
+.venv
+
+# Runtime data, supplied by bind mounts.
+static
+celery-beat-schedule
+
+logs/
+*.log
+
+.pytest_cache/
+.coverage
+htmlcov/
+
+# PROJECT_LOG.md is deliberately NOT ignored: the version test reads it, and
+# the suite must be able to run inside the container.

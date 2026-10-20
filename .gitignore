@@ -1,0 +1,20 @@
+# aistars/.env IS committed: the repo is private and deploys take their
+# configuration from it. It is still kept out of the Docker image
+# (.dockerignore); containers get it through env_file.
+
+# Python
+.venv
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.sqlite3
+build
+dist
+
+.idea
+.vscode
+
+# collectstatic output; a bind mount in production.
+static/
+celery-beat-schedule/

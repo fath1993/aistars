@@ -1,0 +1,74 @@
+{% extends "admin/base_site.html" %}
+{% block title %}System status{% endblock %}
+
+{% block content %}
+<h1>System status</h1>
+
+{% if messages %}
+  <ul class="messagelist">
+    {% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}
+  </ul>
+{% endif %}
+
+<div style="margin:1rem 0 1.5rem 0;padding:1rem;border-radius:6px;
+            background:{% if report.healthy %}#dff0d8{% else %}#f2dede{% endif %};
+            color:#333;">
+  {% if report.healthy %}
+    <strong>Everything is working.</strong>
+    {% if report.warnings %} {{ report.warnings|length }} thing(s) worth a look.{% endif %}
+  {% else %}
+    <strong>{{ report.failures|length }} problem(s) stopping the bot from working.</strong>
+    Each row below says how to fix it.
+  {% endif %}
+</div>
+
+<form method="post" style="margin-bottom:1.5rem;">
+  {% csrf_token %}
+  <button type="submit" name="action" value="register_webhook" class="default">
+    Register the Telegram webhook
+  </button>
+  <button type="submit" name="action" value="resume">
+    Resume (clear the kill switch)
+  </button>
+  <button type="submit" name="action" value="refresh">Re-run checks</button>
+  <p class="help" style="margin-top:.5rem;">
+    Registering points Telegram at
+    <code>{{ webhook_url|default:"— set Public base URL first —" }}</code>
+    and sends it the current webhook secret. Do this after changing the bot
+    token, the secret, or the base URL.
+  </p>
+</form>
+
+{% for section, checks in sections.items %}
+  <h2 style="margin-top:1.5rem;">{{ section }}</h2>
+  <table style="width:100%;border-collapse:collapse;">
+    <tbody>
+    {% for check in checks %}
+      <tr style="border-bottom:1px solid #eee;">
+        <td style="padding:.5rem .75rem;width:5rem;vertical-align:top;">
+          {% if check.status == "ok" %}<span style="color:#2e7d32;">OK</span>
+          {% elif check.status == "warn" %}<span style="color:#ef6c00;">WARN</span>
+          {% else %}<strong style="color:#c62828;">FAIL</strong>{% endif %}
+        </td>
+        <td style="padding:.5rem .75rem;width:16rem;vertical-align:top;">
+          <strong>{{ check.label }}</strong>
+        </td>
+        <td style="padding:.5rem .75rem;vertical-align:top;">
+          <div style="word-break:break-all;">{{ check.detail }}</div>
+          {% if check.fix %}
+            <div class="help" style="margin-top:.25rem;">→ {{ check.fix }}</div>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endfor %}
+
+<p style="margin-top:2rem;">
+  <a href="{% url 'admin:core_runtimesetting_changelist' %}">Runtime settings</a> ·
+  <a href="{% url 'admin:core_controlpanel_changelist' %}">Control panel</a> ·
+  <a href="{% url 'admin:core_activitylog_changelist' %}">Activity log</a> ·
+  <a href="{% url 'admin:core_account_changelist' %}">Accounts</a>
+</p>
+{% endblock %}
