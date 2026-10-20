@@ -156,7 +156,7 @@ def charge_preview(job, cost_micros) -> tuple:
     return credits, ledger.balance(job.account) + job.hold - credits
 
 
-def done(job, cost_micros, tokens_in=0, tokens_out=0) -> int:
+def done(job, cost_micros, tokens_in=0, tokens_out=0, cached=0) -> int:
     """
     Charge what it really cost (never more than the hold), with the tokens
     the provider reported; the new balance.
@@ -165,13 +165,13 @@ def done(job, cost_micros, tokens_in=0, tokens_out=0) -> int:
     with transaction.atomic():
         updated = Job.objects.filter(pk=job.pk, status=Status.RUNNING).update(
             status=Status.DONE, cost_micros=cost_micros, charged=credits,
-            input_tokens=tokens_in, output_tokens=tokens_out,
+            input_tokens=tokens_in, output_tokens=tokens_out, cached_tokens=cached,
             finished_at=timezone.now(), updated_at=timezone.now())
         if updated:
             services.charge(job, credits)
     if updated:
         job.status, job.cost_micros, job.charged = Status.DONE, cost_micros, credits
-        job.input_tokens, job.output_tokens = tokens_in, tokens_out
+        job.input_tokens, job.output_tokens, job.cached_tokens = tokens_in, tokens_out, cached
         activity.info(LogCategory.STUDIO, f"{job.kind}_done",
                       f"#{job.pk} {job.account}: 🪙 {credits} of 🪙 {job.hold} held "
                       f"(${cost_micros / 1e6:.4f})", account=job.account,

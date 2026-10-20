@@ -61,8 +61,12 @@ def help_text() -> str:
           "You only pay what a request really costs, and a big one asks you first."),
         _("📊 Usage shows what you spent by day, tool, agent and model. You can set a daily "
           "limit there."),
+        _("Long chats keep a memory: the newest messages go to the AI word for word, older "
+          "ones as a summary the AI writes, so it does not forget and the price stays even. A "
+          "file goes again with your next few messages; close it on the chat screen."),
+        _("👤 Profile → 📝 About me: a few lines about you that every chat gets."),
         _("Commands: /new a new chat, /agents the agents, /chats your chats, /usage your "
-          "usage, /menu this menu."),
+          "usage, /privacy what is kept, /menu this menu."),
     ]
     lines = [f"{number}. {esc(step)}" for number, step in enumerate(steps, 1)]
     return _bold(_("How it works")) + "\n\n" + "\n".join(lines)
@@ -185,9 +189,13 @@ def profile_text(account) -> str:
     return _bold(_("Profile")) + "\n\n" + "\n".join(lines)
 
 
-def profile_keyboard():
+def profile_keyboard(account=None):
+    from apps.studio.bot import profile_buttons
+
     return _inline([
-        [{"text": "🌐 " + _("Language"), "callback_data": "lang:"}],
+        [{"text": "🌐 " + _("Language"), "callback_data": "lang:"},
+         *profile_buttons(account)],
+        [{"text": "🔒 " + _("Privacy"), "callback_data": "menu:privacy"}],
         nav_row(),
     ])
 

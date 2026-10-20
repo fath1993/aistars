@@ -495,3 +495,54 @@ class SyncTests(TestCase):
         self.assertContains(response, "2 model(s) listed")
         self.assertContains(response, "gpt-7-nova")
         self.assertContains(response, "does not list")
+
+
+class CacheTests(TestCase):
+    """The providers' prompt cache: what is asked for, and what it costs."""
+
+    def setUp(self):
+        Provider.objects.update(api_key="sk-test")
+        self.sol = AIModel.objects.get(model_id="gpt-6.1-sol")
+        self.haiku = AIModel.objects.get(model_id="claude-haiku-5-5")
+
+    def chat(self, model, stream, cache_key=""):
+        with mock.patch("apps.ai.clients.requests.post", return_value=stream) as post:
+            reply = clients.chat(model, "be brief", [{"role": "user", "text": "Hi", "images": []}],
+                                 purpose="chat", on_text=lambda text: None, cache_key=cache_key)
+        return reply, post.call_args.kwargs["json"]
+
+    def test_openai_reads_and_writes_are_priced_apart(self):
+        # 15,000 in: 12,000 read from the cache, 3,000 written to it; 200 out.
+        usage = {"input_tokens": 15000, "output_tokens": 200,
+                 "input_tokens_details": {"cached_tokens": 12000, "cache_write_tokens": 3000}}
+        reply, body = self.chat(self.sol, FakeStream(openai_events("Hi", usage=usage)),
+                                cache_key="aistars-chat-7")
+        self.assertEqual(body["prompt_cache_key"], "aistars-chat-7")
+        self.assertEqual((reply.input_tokens, reply.cached_tokens, reply.written_tokens),
+                         (15000, 12000, 3000))
+        # Sol: $2 in, $10 out per 1M; reads 0.05x, writes 1.25x.
+        self.assertEqual(reply.cost_micros, round(12000 * 2 * 0.05 + 3000 * 2 * 1.25 + 200 * 10))
+
+    def test_no_key_no_cache_key(self):
+        _reply, body = self.chat(self.sol, FakeStream(openai_events("Hi")))
+        self.assertNotIn("prompt_cache_key", body)
+
+    def test_anthropic_caches_when_asked_and_counts_all_the_input(self):
+        reply, body = self.chat(self.haiku, FakeStream([
+            {"type": "message_start", "message": {"usage": {
+                "input_tokens": 50, "cache_read_input_tokens": 10000,
+                "cache_creation_input_tokens": 2000}}},
+            {"type": "message_delta", "usage": {"output_tokens": 100}}]), cache_key="k")
+        self.assertEqual(body["cache_control"], {"type": "ephemeral"})
+        self.assertEqual((reply.input_tokens, reply.cached_tokens, reply.written_tokens),
+                         (12050, 10000, 2000))
+        # Haiku: $0.10 in, $0.50 out per 1M; reads 0.1x, writes 1.25x.
+        self.assertEqual(reply.cost_micros, round(50 * 0.1 + 10000 * 0.1 * 0.1
+                                                  + 2000 * 0.1 * 1.25 + 100 * 0.5))
+        _reply, body = self.chat(self.haiku, FakeStream([]))
+        self.assertNotIn("cache_control", body)
+
+    def test_the_seeded_factors(self):
+        self.assertEqual((self.sol.cache_read_factor, self.sol.cache_write_factor),
+                         (Decimal("0.050"), Decimal("1.250")))
+        self.assertEqual(self.haiku.cache_read_factor, Decimal("0.100"))

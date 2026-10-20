@@ -154,6 +154,10 @@ class StudioTestCase(TestCase):
                              side_effect=self.download)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # Naming chats and folding their memory: tested on their own (test_memory).
+        patcher = mock.patch("apps.studio.tasks.tidy_chat.delay")
+        self.tidy = patcher.start()
+        self.addCleanup(patcher.stop)
         Provider.objects.filter(kind="openai").update(api_key="sk-test")
         ControlPanel.objects.update_or_create(singleton=1, defaults={"demo_mode": self.demo})
         self.account = register(42, tester=True)
@@ -269,8 +273,9 @@ class StudioTestCase(TestCase):
         return ledger.balance(self.account)
 
     def asked(self, number=-1):
-        """The number-th chat request OpenAI got: its instructions and its input."""
-        return self.openai.sent("responses")[number]["json"]
+        """The number-th chat answer OpenAI was asked for: its instructions and its input."""
+        return [call for call in self.openai.sent("responses")
+                if call["json"].get("stream")][number]["json"]
 
     def said(self, number=-1):
         """[(role, text)] of a chat request, files and photos left out."""

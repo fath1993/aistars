@@ -88,7 +88,8 @@ class AIModelAdmin(admin.ModelAdmin):
                            "tokens. Voice to text: unit price per minute. Text to speech: "
                            "unit price per 1M characters.",
             "fields": ("input_price", "output_price", "image_input_price", "unit_price",
-                       "max_output_tokens", "margin")}),
+                       "cache_write_factor", "cache_read_factor", "max_output_tokens",
+                       "margin")}),
         ("Used by the bot itself", {"fields": ("default_for_translation",
                                                "default_for_safety")}),
     )

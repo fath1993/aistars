@@ -39,3 +39,10 @@ def credits_for(cost_usd, margin=None) -> int:
     margin = margin_percent() if margin is None else Decimal(str(margin))
     credits = cost / star_value_usd() * (1 + margin / 100)
     return max(1, math.ceil(credits))
+
+
+def credits_exact(cost_micros, model=None) -> Decimal:
+    """Credits before rounding up: to say "less than 🪙 1" of a small part of a price."""
+    margin = model.margin if model is not None and model.margin is not None else None
+    margin = margin_percent() if margin is None else Decimal(str(margin))
+    return Decimal(int(cost_micros)) / 1_000_000 / star_value_usd() * (1 + margin / 100)

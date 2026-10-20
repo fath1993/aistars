@@ -185,6 +185,9 @@ def _route_message(account, message):
     if command == "help":
         ui.fresh_screen(account, chat_id, menus.help_text(), menus.back_keyboard())
         return
+    if command == "privacy":
+        ui.fresh_screen(account, chat_id, studio_bot.privacy_text(), menus.back_keyboard())
+        return
     if command and billing_bot.handle_command(account, chat_id, command):
         return
     if command and studio_bot.handle_command(account, chat_id, command):
@@ -329,8 +332,12 @@ def _route_callback(account, callback_query):
 def _menu(account, chat_id, section):
     if section == "help":
         ui.screen(account, chat_id, menus.help_text(), menus.back_keyboard())
+    elif section == "privacy":
+        ui.screen(account, chat_id, studio_bot.privacy_text(),
+                  menus.back_keyboard("menu:profile"))
     elif section == "profile":
-        ui.screen(account, chat_id, menus.profile_text(account), menus.profile_keyboard())
+        ui.screen(account, chat_id, menus.profile_text(account),
+                  menus.profile_keyboard(account))
     elif section == "new":
         ui.fresh_screen(account, chat_id, menus.home_text(account),
                         menus.home_keyboard(account))
@@ -351,4 +358,5 @@ def _language(account, chat_id, code):
     activity.info(LogCategory.ACCOUNT, "language_changed",
                   f"{account} chose {code}", account=account)
     with languages.activate_for(account):
-        ui.screen(account, chat_id, menus.profile_text(account), menus.profile_keyboard())
+        ui.screen(account, chat_id, menus.profile_text(account),
+                  menus.profile_keyboard(account))

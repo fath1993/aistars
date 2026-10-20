@@ -89,6 +89,9 @@ class Profile(models.Model):
                                    help_text="⭐ My agents.")
     daily_limit = models.PositiveIntegerField(
         null=True, blank=True, help_text="The most credits a day the user allows themselves.")
+    about = models.TextField(
+        blank=True, help_text="About me: what the user wrote about themselves; every chat "
+                              "gets it.")
 
     def __str__(self):
         return f"{self.account}"
@@ -104,6 +107,17 @@ class Conversation(models.Model):
                               related_name="+")
     assistant = models.ForeignKey(Assistant, null=True, blank=True, on_delete=models.SET_NULL,
                                   related_name="conversations")
+    # The AI named it (from its first question and answer).
+    titled = models.BooleanField(default=False)
+    # Its earlier messages, summarized by AI (memory.py), up to message
+    # memory_upto; the ones after go word for word.
+    memory = models.TextField(blank=True)
+    memory_upto = models.BigIntegerField(null=True, blank=True)
+    # Photos and files the user closed: they no longer go with its messages.
+    closed_files = models.JSONField(default=list, blank=True)
+    # 🧹 Start fresh: the chat this one carries the memory of.
+    parent = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL,
+                               related_name="+")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True, db_index=True)
 
@@ -192,6 +206,8 @@ class Job(models.Model):
     # (images: image tokens made).
     input_tokens = models.PositiveIntegerField(default=0)
     output_tokens = models.PositiveIntegerField(default=0)
+    # Of input_tokens: read from the provider's cache (cheaper).
+    cached_tokens = models.PositiveIntegerField(default=0)
     cost_micros = models.BigIntegerField(default=0, help_text="What it cost you.")
     hold = models.PositiveIntegerField(default=0, help_text="Credits held when it started.")
     charged = models.PositiveIntegerField(default=0, help_text="Credits it was charged.")
@@ -203,6 +219,8 @@ class Job(models.Model):
     result_file_id = models.CharField(max_length=255, blank=True)
     original_file_id = models.CharField(max_length=255, blank=True)
     archive_message_id = models.BigIntegerField(null=True, blank=True)
+    # The archive's copies of what the user sent (removed with the chat).
+    archive_ids = models.JSONField(default=list, blank=True)
     error = models.CharField(max_length=500, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)

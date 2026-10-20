@@ -232,7 +232,8 @@ def start_speech(account, chat_id, text, screen_check=True):
             return None
     try:
         job = jobs.start(account, chat_id, Kind.SPEECH, model, model.speech_cost_micros(len(text)),
-                         prompt=text, screening=screening, options={"voice": voice_of(account)})
+                         prompt=text, screening=screening,
+                         options={"voice": voice_of(account), "characters": len(text)})
     except jobs.NotEnough as exc:
         telegram.send_message(chat_id, texts.not_enough_text(exc.hold, exc.balance),
                               reply_markup=texts.not_enough_keyboard(chat=False))

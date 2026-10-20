@@ -165,6 +165,12 @@ class Alert(str):
     """A button's answer shown as a box the user closes, not a passing toast."""
 
 
+def delete_messages(chat_id, message_ids):
+    """Up to 100 messages of one chat at once; True when Telegram deleted them."""
+    return bool(_call("deleteMessages", chat_id=chat_id,
+                      message_ids=json.dumps(list(message_ids)[:100])))
+
+
 def answer_callback_query(callback_query_id, text=""):
     payload = {"callback_query_id": callback_query_id, "text": text[:200]}
     if isinstance(text, Alert):

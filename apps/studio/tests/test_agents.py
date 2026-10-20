@@ -96,7 +96,7 @@ class StartTests(StudioTestCase):
         self.assertIn("Which country are you in, and what happened?", text)
         self.assertIn("Or tap a question below to begin.", text)
         self.assertEqual(self.buttons()[:4], ["ag:ask:0", "ag:ask:1", "ag:ask:2", "chat:new"])
-        self.assertIn("ag:card:lawyer", self.buttons(), "ℹ️ About the agent")
+        self.assertIn("ag:about:lawyer", self.buttons(), "ℹ️ About the agent")
         self.say("I was fired without notice")
         job = Job.objects.get()
         self.assertEqual(job.model.model_id, "gpt-6.1-sol")

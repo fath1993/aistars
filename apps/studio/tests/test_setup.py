@@ -132,6 +132,13 @@ class DoctorTests(TestCase):
     def test_nobody_can_use_them_without_a_tester(self):
         self.assertEqual(self.labels()["Using the tools"].status, diagnostics.WARN)
 
+    def test_chat_memory_needs_a_model_to_write_it(self):
+        ControlPanel.objects.update_or_create(singleton=1, defaults={"demo_mode": False})
+        self.assertEqual(self.labels()["Chat memory"].status, diagnostics.WARN)
+        Provider.objects.filter(kind="openai").update(api_key="sk-test")
+        self.assertEqual(self.labels()["Chat memory"].detail,
+                         "8000 tokens word for word, older messages summarized by GPT-6 Luna")
+
     def test_an_agent_in_no_category(self):
         Assistant.objects.filter(slug="tutor").update(category=None)
         self.assertIn("1 agent(s) on offer are in no category",

@@ -104,4 +104,9 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.studio.tasks.sweep_jobs',
         'schedule': crontab(minute='*/5'),
     },
+    # Chats unused for CHAT_KEEP_DAYS, and older requests' words (privacy).
+    'purge_chats': {
+        'task': 'apps.studio.tasks.purge_chats',
+        'schedule': crontab(hour=3, minute=40),
+    },
 }

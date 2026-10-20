@@ -185,9 +185,35 @@ visitor ⇄ HTTPS ⇄ Cloudflare ⇄ HTTP ⇄ edge (server-edge, Traefik, :80) �
   model (each with the price of an everyday answer), start new chats with
   the General assistant or an agent, reopen or delete old ones (**My
   chats**).
-  **🔊 Listen** under an answer reads it aloud. Runtime settings: **Chat
-  memory** (earlier messages sent with each new one), **Longest message**,
-  **Requests at once per user**.
+  **🔊 Listen** under an answer reads it aloud. Runtime settings: **Longest
+  message**, **Requests at once per user**.
+- **Chat memory:** a chat's newest messages go to the AI word for word, up to
+  **Chat memory, word for word (tokens)** (8,000); older ones are summarized
+  by the model marked **Default for translation** into the chat's memory,
+  which goes with every message (free for users; it counts against your AI
+  spending limits; you can read it in AI tools → Conversations). The same
+  model names each new chat. A photo or file goes again with **Files go
+  with (messages)** (5) messages of its chat; the chat screen lists them
+  with what they add to each message, and users can close them (also from
+  under an answer). **🧹 Start fresh** opens a new chat that carries the
+  memory; **📤 Export** sends the chat as a text file; My chats can be
+  searched. **📝 About me** (Profile): a few lines every chat gets. The
+  doctor warns when no model can write the memory.
+- **Prompt caching:** OpenAI caches the start of every request by itself
+  (each chat gets its own `prompt_cache_key`); Anthropic's models are asked to
+  cache chats. Each model's **cache write** and **cache read** factors (AI →
+  Models: 1.25 and 0.1; 0.05 for GPT-6.1 Sol and Claude Sonnet 5.5) price
+  what the provider reports, so users pay less for long chats and files they
+  keep asking about; holds count all input at the write price.
+- **Privacy:** deleting a chat (or **Delete all**) removes its messages and
+  memory, its words from the requests and passed safety checks (amounts stay
+  on statements; blocked messages stay as the record of a strike), and its
+  copies in the archive channel. Chats unused for **Delete chats unused for
+  (days)** (180; 0 keeps them) go every night at 03:40 UTC, with the words
+  of older requests. Give the bot the **Delete messages** right in the
+  archive channel: without it, Telegram lets it delete copies only for 48
+  hours (the activity log says when some stay). `/privacy` (also Profile →
+  🔒 Privacy) tells users all this, and that you can read chats.
 - **🧩 Agents:** AI assistants made for one job, each with its own
   instructions (in English; it answers in the user's language), starter
   questions users can tap, and optionally its own model. 39 to start with, in
@@ -211,7 +237,7 @@ visitor ⇄ HTTPS ⇄ Cloudflare ⇄ HTTP ⇄ edge (server-edge, Traefik, :80) �
   **📊 Usage** (home, `/usage`) shows today, 7 and 30 days, by tool, agent and
   model, the last requests, and a daily limit users may set themselves.
 - **Commands:** `/new`, `/agents`, `/chats`, `/usage`, `/images`, `/voice`,
-  `/menu`, `/help` (typed; there is no ☰ command list).
+  `/privacy`, `/menu`, `/help` (typed; there is no ☰ command list).
 - **🎨 Images:** Create an image from a description, or Edit a photo (or
   several, sent as one album). Shape
   and quality are buttons; the summary shows the most it can cost. The image

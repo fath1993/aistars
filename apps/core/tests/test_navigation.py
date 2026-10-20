@@ -91,6 +91,9 @@ class ScreenTests(NavigationTestCase):
             "use:": "menu:home",
             "use:last:0": "use:",
             "use:limit": "use:",
+            "me:": "menu:profile",
+            "menu:privacy": "menu:profile",
+            "chat:search": "chat:list:0",
         }
         for data, target in back_to.items():
             edit = self.tap(data)

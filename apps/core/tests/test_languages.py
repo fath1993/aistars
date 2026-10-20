@@ -90,7 +90,7 @@ class PickerTests(TestCase):
     def test_profile_has_a_language_button(self):
         post_update(callback_update("menu:profile", self.panel))
         callbacks = keyboard_callbacks(self.tg.last("editMessageText"))
-        self.assertEqual(callbacks, ["lang:", "menu:home", "menu:home"])
+        self.assertEqual(callbacks, ["lang:", "menu:privacy", "menu:home", "menu:home"])
 
     def test_the_list_shows_the_used_languages_and_ticks_the_current(self):
         Language.objects.filter(code="ru").update(used=False)

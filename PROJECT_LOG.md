@@ -50,6 +50,74 @@ touches one, update it in the same change.
 
 ## Changelog
 
+### 2026-10-20 — v0.4.0 — Chat memory, files that close, caching, privacy
+
+The owner asked how chat history is handled. As built, the last 20 messages
+went with each new one and older ones were dropped silently; photos and
+files went again with every follow-up; and deleting a chat left the user's
+words in the requests and safety checks and their files in the archive.
+Proposed (Requests, below); the owner chose the AI-written chat memory, left
+the retention to me (180 days), keeps full admin access ("admin is admin"),
+and left About me to me (in now).
+
+**Chat memory.** A chat's newest messages go word for word up to **Chat
+memory, word for word (tokens)** (8,000, replacing Chat memory (messages));
+older ones are folded by AI into the chat's memory, which goes with every
+message after the instructions, the agent's role and About me. Folding runs
+in the background after an answer, only once the messages after the memory
+pass the budget, and folds the oldest (a question with its answer, never the
+last two) until half is left: now and then, not every message, so the start
+of the request stays the same for the providers' cache. It uses the model
+marked Default for translation, keeps facts, decisions, numbers and what
+files contained, treats the chat as data, is free for users and counts
+against the AI spending limits; Demo mode writes a demo memory; without a
+usable model the oldest messages wait and are left out (the doctor warns).
+The chat screen says how many messages are in the memory; the admin shows
+it. The same step names each new chat with a few words in its language.
+
+**Files.** A photo or file goes again with **Files go with (messages)** (5)
+messages of its chat, then the memory keeps what was said about it. The chat
+screen lists the files that go again, with what each adds to a message (up
+to 🪙 15 for a 30-page PDF on GPT-6.1 Sol, under 🪙 1 for a photo), with
+✖️ Close and Close all; an answer has 📎 Close the files while some go
+again. A file sent again is open again. A question's own files always go.
+
+**Prompt caching, priced right.** Checked today: OpenAI caches the start of
+every request on its newer models by itself and bills cache writes at 1.25×
+and reads at 0.1× the input price (0.05× on GPT-6.1 Sol); Anthropic caches
+when asked (top-level `cache_control`), writes 1.25× (5 minutes), reads 0.1×
+(0.05× on Sonnet 5.5). Every chat was being priced as plain input:
+writes under-charged, reads over-charged. Now each model has cache write
+and read factors (AI → Models; migration ai 0003 seeds them); the clients
+read `cached_tokens`/`cache_write_tokens` (OpenAI) and
+`cache_read_input_tokens`/`cache_creation_input_tokens` (Anthropic, added to
+its input) and price each part; chats send `prompt_cache_key` (their own,
+also keeping users' caches apart) and ask Anthropic to cache. Holds count all
+input at the write price. 🧾 Details says how much came from the cache.
+
+**Your chats.** 🧹 Start fresh: a new chat with the same agent whose memory
+carries what matters of the old one ("Send it in a new chat" does the same).
+📤 Export: the chat as a text file. My chats: 🔍 Search (titles and
+messages) and 🗑 Delete all. A chat reopened from My chats is the chat screen
+with its last message and 🗑 Delete. 📝 About me (Profile): up to 600
+characters every chat gets, checked like a chat message, cleared any time.
+
+**Privacy.** Deleting a chat (one or all) removes its messages and memory,
+its words and files from its requests (amounts stay on statements) and from
+the safety checks it passed (a blocked one stays: the record of a strike),
+and its copies in the archive channel (now recorded per request; Telegram
+needs the bot's Delete messages right there after 48 hours, and the activity
+log says when some stay). Every night (03:40 UTC) chats unused for **Delete
+chats unused for (days)** (180; 0 keeps them) go the same way, with the
+words of older requests outside chats and old passed checks. `/privacy` and
+Profile → 🔒 Privacy say what is kept and for how long, that the providers
+get each request (OpenAI asked not to store it), and that the owner can read
+chats. Help explains the memory, files, About me and /privacy.
+
+Tests: caching in both clients, folding, naming, the window, files closing
+and reopening, Start fresh, About me, export, search, deleting everywhere,
+the nightly purge, /privacy, the doctor. 584 tests.
+
 ### 2026-10-20 — v0.3.0 — Agent catalog, costs on every request, Usage page
 
 The owner: when starting a chat, the user should choose the kind of

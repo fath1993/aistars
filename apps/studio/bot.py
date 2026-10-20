@@ -4,8 +4,9 @@ language. Anything typed that is not an answer to a question the bot asked
 is a chat message; photos, files and voice notes go to the chat too, unless
 a tool asked for them.
 
-Buttons: chat:, ag: (agents), img:, voice: and use: (usage) on the panel;
-out: on messages that are not the panel (an answer, an image, a notice).
+Buttons: chat:, ag: (agents), img:, voice:, use: (usage) and me: (About me)
+on the panel; out: on messages that are not the panel (an answer, an image,
+a notice).
 """
 
 from django.core.cache import cache
@@ -17,7 +18,7 @@ from apps.core import menus
 from apps.core.i18n import gettext as _
 from apps.core.services import telegram, ui
 
-from . import agents, catalog, chat, images, jobs, state, texts, usage, voice
+from . import agents, catalog, chat, images, jobs, memory, privacy, state, texts, usage, voice
 from .models import Category, Conversation, Job, Message, Role
 
 COMMANDS = ("new", "chat", "chats", "agents", "usage", "images", "voice")
@@ -109,6 +110,13 @@ def handle_text(account, chat_id, text) -> bool:
                                  "slugs": [agent.slug for agent in found]})
         _show(account, chat_id, texts.list_text("search", found, text),
               texts.list_keyboard("search", found), fresh=True)
+    elif step == "chat_search":
+        state.stop(account)
+        rows = chat.search_chats(account, text)
+        _show(account, chat_id, texts.chats_text(rows, 0, text),
+              texts.chats_keyboard(rows, 0, False, found=True), fresh=True)
+    elif step == "about_me":
+        _about_typed(account, chat_id, text)
     elif step == "agent_find":
         state.stop(account)
         _show(account, chat_id, texts.finding_text(), menus.back_keyboard("ag:"), fresh=True)
@@ -148,7 +156,7 @@ def handle_media(account, chat_id, message) -> bool:
 def handle_callback(account, chat_id, verb, argument, message_id=None):
     """The answer to show ('' for none), or None for a verb that is not ours."""
     handler = {"chat": _chat, "ag": _agents, "img": _images, "voice": _voice, "use": _usage,
-               "out": _out}.get(verb)
+               "me": _me, "out": _out}.get(verb)
     if handler is None:
         return None
     if not jobs.may_use(account):
@@ -166,14 +174,25 @@ def handle_callback(account, chat_id, verb, argument, message_id=None):
 
 # ---- Chat -----------------------------------------------------------------
 
-def _chat_screen(account, chat_id, fresh=False, conversation=None):
+def _chat_screen(account, chat_id, fresh=False, conversation=None, opened=False):
+    """The chat now (or one reopened from My chats): its memory and the files that go again."""
     conversation = conversation or chat.current(account)
     model = chat.model_of(account, conversation)
     count = conversation.messages.count() if conversation is not None else 0
     has_chats = Conversation.objects.filter(account=account, messages__isnull=False).exists()
     typical = chat.typical_price(model) if model is not None else None
-    _show(account, chat_id, texts.chat_text(conversation, model, count, typical),
-          texts.chat_keyboard(conversation, count, has_chats), fresh)
+    going = chat.open_files(conversation, model)
+    folded = memory.folded_count(conversation) if conversation is not None else 0
+    last = conversation.messages.order_by("-id").first() if opened else None
+    parent = conversation.parent if conversation is not None and conversation.parent_id \
+        else None
+    _show(account, chat_id,
+          texts.chat_text(conversation, model, count, typical,
+                          [(item, chat.file_price(model, item)) for _m, _i, item in going],
+                          folded, last, parent),
+          texts.chat_keyboard(conversation, count, has_chats,
+                              [(message.pk, index, item) for message, index, item in going],
+                              opened), fresh)
 
 
 def _new_chat(account, chat_id, fresh=False):
@@ -219,12 +238,32 @@ def _chat(account, chat_id, action, value):
         if conversation is None:
             return _chat(account, chat_id, "list", "0")
         jobs.touch_conversation(conversation)
-        model = chat.model_of(account, conversation)
-        last = conversation.messages.order_by("-id").first()
-        ui.screen(account, chat_id,
-                  texts.opened_text(conversation, model, conversation.messages.count(), last,
-                                    chat.typical_price(model) if model else None),
-                  texts.opened_keyboard(conversation))
+        _chat_screen(account, chat_id, conversation=conversation, opened=True)
+    elif action in ("close", "closeall"):
+        return _close_files(account, chat_id, value)
+    elif action == "fresh":
+        conversation = chat.current(account)
+        if conversation is not None and conversation.messages.exists():
+            _chat_screen(account, chat_id, conversation=chat.start_fresh(account, conversation))
+            return "🧹 " + _("A fresh chat")
+        _chat_screen(account, chat_id)
+    elif action == "export":
+        conversation = chat.current(account)
+        if conversation is None or not conversation.messages.exists():
+            return _("This chat has no messages yet.")
+        chat.export(chat_id, conversation)
+        return "📤 " + _("Sent below")
+    elif action == "search":
+        state.wait(account, "chat_search")
+        _show(account, chat_id, texts.search_chats_text(), menus.back_keyboard("chat:list:0"))
+    elif action == "delall":
+        count = Conversation.objects.filter(account=account, messages__isnull=False) \
+            .distinct().count()
+        _show(account, chat_id, texts.delete_all_text(count), texts.delete_all_keyboard())
+    elif action == "delallok":
+        count = privacy.delete_all(account)
+        _chat(account, chat_id, "list", "0")
+        return "🗑 " + _("Deleted: %(count)s") % {"count": count}
     elif action == "del":
         conversation = _own_conversation(account, value)
         if conversation is None:
@@ -234,12 +273,26 @@ def _chat(account, chat_id, action, value):
     elif action == "delok":
         conversation = _own_conversation(account, value)
         if conversation is not None:
-            conversation.delete()
+            privacy.delete_chat(conversation)
         _chat(account, chat_id, "list", "0")
         return "🗑 " + _("Deleted")
     else:
         _chat_screen(account, chat_id)
     return ""
+
+
+def _close_files(account, chat_id, value, conversation=None):
+    """✖️ on a file (message pk:index), or on all of them (no value)."""
+    conversation = conversation or chat.current(account)
+    if conversation is None:
+        return ""
+    going = chat.open_files(conversation, chat.model_of(account, conversation))
+    message_pk, _sep, index = value.partition(":")
+    chosen = [item["file_id"] for message, number, item in going
+              if not value or (str(message.pk), str(number)) == (message_pk, index)]
+    memory.close(conversation, chosen)
+    _chat_screen(account, chat_id, conversation=conversation)
+    return "📎 " + _("Closed: the AI keeps what was said about it.") if chosen else ""
 
 
 def _models_screen(account, chat_id, fresh=False):
@@ -409,6 +462,52 @@ def _voice(account, chat_id, action, value):
     return ""
 
 
+# ---- About me -------------------------------------------------------------
+
+def _me(account, chat_id, action, value, fresh=False):
+    profile = chat.profile(account)
+    if action == "edit":
+        state.wait(account, "about_me")
+        _show(account, chat_id, texts.ask_about_text(), texts.cancel_keyboard("me:"), fresh)
+        return ""
+    if action == "clear":
+        type(profile).objects.filter(pk=profile.pk).update(about="")
+        profile.about = ""
+    _show(account, chat_id, texts.about_text(profile.about), texts.about_keyboard(
+        bool(profile.about)), fresh)
+    return "🗑 " + _("Cleared") if action == "clear" else ""
+
+
+def _about_typed(account, chat_id, text):
+    """About me, as typed: checked like a chat message, then kept."""
+    from apps.safety import checks
+
+    if len(text) > texts.ABOUT_LIMIT:
+        telegram.send_message(chat_id, telegram.esc(texts.about_too_long_text()),
+                              reply_markup=texts.notice_keyboard())
+        return
+    state.stop(account)
+    screening = checks.screen(account, "chat", "", text, demo=jobs.demo())
+    if not chat.passed(account, chat_id, screening):
+        return
+    profile = chat.profile(account)
+    type(profile).objects.filter(pk=profile.pk).update(about=text.strip())
+    _me(account, chat_id, "", "", fresh=True)
+
+
+def profile_buttons(account) -> list:
+    """On the Profile screen."""
+    return [texts.about_button()] if jobs.may_use(account) else []
+
+
+def privacy_text() -> str:
+    from apps.core import runtime
+
+    from . import archive
+
+    return texts.privacy_text(int(runtime.get("CHAT_KEEP_DAYS")), bool(archive.chat_id()))
+
+
 # ---- Usage ----------------------------------------------------------------
 
 def _usage(account, chat_id, action, value, fresh=False):
@@ -469,6 +568,11 @@ def _out(account, chat_id, action, value, message_id=None):
         _new_chat(account, chat_id, fresh=True)
     elif action == "usage":
         _usage(account, chat_id, "", "", fresh=True)
+    elif action == "closefiles":
+        conversation = _own_conversation(account, value)
+        if conversation is not None:
+            _close_files(account, chat_id, "", conversation)
+            return "📎 " + _("Closed: the AI keeps what was said about them.")
     elif action == "retry":
         job = _own_job(account, value)
         if job is not None:

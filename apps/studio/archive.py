@@ -91,7 +91,32 @@ def copy_input(job, kind, file_id):
         activity.warn(LogCategory.STUDIO, "archive_failed",
                       f"could not copy the input of #{job.pk} to the archive",
                       account=job.account)
+        return sent
+    # Kept, so the copy goes when its chat is deleted.
+    job.archive_ids = [*(job.archive_ids or []), sent["message_id"]]
+    type(job).objects.filter(pk=job.pk).update(archive_ids=job.archive_ids)
     return sent
+
+
+def remove(message_ids) -> bool:
+    """
+    Delete copies from the archive channel. Telegram lets a bot delete them
+    when it has the channel's Delete messages right; without it, only for 48
+    hours. False when some stay.
+    """
+    archive, ids = chat_id(), [int(pk) for pk in message_ids if pk]
+    if not archive or not ids:
+        return True
+    done = True
+    for start in range(0, len(ids), 100):
+        if not telegram.delete_messages(archive, ids[start:start + 100]):
+            done = False
+    if not done:
+        activity.warn(LogCategory.STUDIO, "archive_not_deleted",
+                      f"{len(ids)} archive copies could not all be deleted: give the bot the "
+                      "Delete messages right in the archive channel",
+                      detail={"messages": ids[:50]})
+    return done
 
 
 def store_output(job, kind, data, filename, content_type, role="output"):

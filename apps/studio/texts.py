@@ -11,6 +11,7 @@ Where a screen sits is shown as a trail: 🧩 Agents › ⚖️ Law.
 """
 
 import json
+import math
 
 from django.utils import formats, timezone
 
@@ -148,7 +149,13 @@ def _agent_of(conversation):
         else None
 
 
-def chat_text(conversation, model, count, typical=None) -> str:
+def chat_text(conversation, model, count, typical=None, files=(), folded=0, last=None,
+              parent=None) -> str:
+    """
+    `files`: [(item, credits it adds to a message, unrounded)] that go again;
+    `folded`: messages in the memory; `last`: the newest message (a chat
+    reopened); `parent`: the chat a fresh one carries the memory of.
+    """
     agent = _agent_of(conversation)
     head = f"💬 {_bold(_('Chat'))}" + (f" · {esc(agent_title(agent))}" if agent else "")
     lines = [head, ""]
@@ -162,6 +169,17 @@ def chat_text(conversation, model, count, typical=None) -> str:
     if count:
         title = conversation.title or "…"
         lines.append(f"{esc(_('This chat'))}: “{esc(title)}” · {esc(_('Messages'))}: {count}")
+    if folded:
+        lines.append("🧠 " + esc(_("Memory: %(count)s earlier messages, summarized by AI; the "
+                                  "newest go word for word.") % {"count": folded}))
+    if parent is not None and not count:
+        lines.append("🧹 " + esc(_("A fresh chat: the AI remembers what matters from "
+                                  "“%(title)s”.") % {"title": parent.title or "…"}))
+    if files:
+        lines += ["", "📎 " + esc(_("Read again with each message (cheaper while you keep "
+                                    "chatting):"))]
+        lines += [f"• {esc(file_label(item))} · {esc(price_hint(exact))}"
+                  for item, exact in files]
     lines.append("")
     if agent is not None and not count:
         lines.append(esc(catalog.tr(agent.first_message) or _("Type your message.")))
@@ -170,7 +188,24 @@ def chat_text(conversation, model, count, typical=None) -> str:
     else:
         lines.append(esc(_("Type a message, or send photos, files or a voice note, with a "
                            "question as their caption.")))
+    if last is not None:
+        excerpt = last.text if len(last.text) <= 300 else last.text[:300].rsplit(" ", 1)[0] + " …"
+        who = _("AI") if last.role == "assistant" else _("You")
+        lines += ["", f"<i>{esc(who)}: {esc(excerpt)}</i>"]
     return "\n".join(lines)
+
+
+def file_label(item) -> str:
+    if item["kind"] == "photo":
+        return "🖼 " + _("photo")
+    return "📄 " + (item.get("name") or _("file"))
+
+
+def price_hint(exact) -> str:
+    """A part of a price: "up to 🪙 12", or "under 🪙 1"."""
+    if exact < 1:
+        return _("under %(price)s") % {"price": coins(1)}
+    return _("up to %(price)s") % {"price": coins(math.ceil(exact))}
 
 
 def starter_buttons(agent, verb) -> list:
@@ -183,20 +218,31 @@ def _cut(text, limit) -> str:
     return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
-def chat_keyboard(conversation, count, has_chats):
+def chat_keyboard(conversation, count, has_chats, files=(), opened=False):
+    """`files`: [(message pk, index, item)] that go again, each with a Close button."""
     agent = _agent_of(conversation)
     rows = starter_buttons(agent, "ag:ask") if agent is not None and not count else []
+    for message_pk, index, item in files[:4]:
+        rows.append([{"text": "✖️ " + _("Close %(file)s") % {"file": _cut(file_label(item), 40)},
+                      "callback_data": f"chat:close:{message_pk}:{index}"}])
+    if len(files) > 1:
+        rows.append([{"text": "✖️ " + _("Close all files"), "callback_data": "chat:closeall"}])
     rows.append([{"text": "➕ " + _("New chat") if count else "🧩 " + _("Change agent"),
                   "callback_data": "chat:new"},
                  {"text": "🤖 " + _("Model"), "callback_data": "chat:models"}])
+    if count:
+        rows.append([{"text": "🧹 " + _("Start fresh"), "callback_data": "chat:fresh"},
+                     {"text": "📤 " + _("Export"), "callback_data": "chat:export"}])
     row = []
-    if has_chats:
+    if opened:
+        row.append({"text": "🗑 " + _("Delete"), "callback_data": f"chat:del:{conversation.pk}"})
+    elif has_chats:
         row.append({"text": "🗂 " + _("My chats"), "callback_data": "chat:list:0"})
     if agent is not None:
-        row.append({"text": "ℹ️ " + _("About the agent"), "callback_data": f"ag:card:{agent.slug}"})
+        row.append({"text": "ℹ️ " + _("About the agent"), "callback_data": f"ag:about:{agent.slug}"})
     if row:
         rows.append(row)
-    rows.append(nav_row())
+    rows.append(nav_row("chat:list:0" if opened else "menu:home"))
     return _inline(rows)
 
 
@@ -248,13 +294,18 @@ def models_keyboard(models, current, back="chat:", verb="chat:model"):
     return _inline(rows)
 
 
-def chats_text(conversations, page) -> str:
+def chats_text(conversations, page, words=None) -> str:
+    head = f"🗂 {_bold(_('My chats'))}"
+    if words is not None:
+        head += f" · 🔍 “{esc(words[:100])}”"
+        if not conversations:
+            return head + "\n\n" + esc(_("No chat has these words."))
     if not conversations:
-        return f"🗂 {_bold(_('My chats'))}\n\n" + esc(_("No chats yet. Just type to start one."))
-    return f"🗂 {_bold(_('My chats'))}\n\n" + esc(_("Tap a chat to continue it."))
+        return head + "\n\n" + esc(_("No chats yet. Just type to start one."))
+    return head + "\n\n" + esc(_("Tap a chat to continue it."))
 
 
-def chats_keyboard(conversations, page, has_more):
+def chats_keyboard(conversations, page, has_more, found=False):
     rows = []
     for conversation in conversations:
         day = formats.date_format(timezone.localtime(conversation.updated_at),
@@ -269,32 +320,59 @@ def chats_keyboard(conversations, page, has_more):
         nav.append({"text": _("Older") + " ›", "callback_data": f"chat:list:{page + 1}"})
     if nav:
         rows.append(nav)
-    rows.append(nav_row("chat:"))
+    if found:
+        rows.append([{"text": "🔍 " + _("Search again"), "callback_data": "chat:search"}])
+    elif conversations or page:
+        rows.append([{"text": "🔍 " + _("Search my chats"), "callback_data": "chat:search"},
+                     {"text": "🗑 " + _("Delete all"), "callback_data": "chat:delall"}])
+    rows.append(nav_row("chat:list:0" if found else "chat:"))
     return _inline(rows)
 
 
-def opened_text(conversation, model, count, last, typical=None) -> str:
-    text = chat_text(conversation, model, count, typical)
-    if last is not None:
-        excerpt = last.text if len(last.text) <= 300 else last.text[:300].rsplit(" ", 1)[0] + " …"
-        who = _("AI") if last.role == "assistant" else _("You")
-        text += f"\n\n<i>{esc(who)}: {esc(excerpt)}</i>"
-    return text
+def search_chats_text() -> str:
+    return f"🔍 {_bold(_('Search my chats'))}\n\n" + esc(
+        _("Type words from a chat's title or messages."))
 
 
-def opened_keyboard(conversation):
-    return _inline([
-        [{"text": "🤖 " + _("Model"), "callback_data": "chat:models"},
-         {"text": "🗑 " + _("Delete this chat"), "callback_data": f"chat:del:{conversation.pk}"}],
-        [{"text": "➕ " + _("New chat"), "callback_data": "chat:new"}],
-        nav_row("chat:list:0"),
-    ])
+def delete_all_text(count) -> str:
+    return (f"🗑 {_bold(_('Delete all your chats?'))}\n\n"
+            + esc(_("%(count)s chats and their messages, memories and files are removed for "
+                    "good. What you were charged stays on your statement.") % {"count": count}))
+
+
+def delete_all_keyboard():
+    return _inline([[{"text": "🗑 " + _("Delete all"), "callback_data": "chat:delallok"}],
+                    nav_row("chat:list:0")])
+
+
+def export_caption(conversation) -> str:
+    return f"📤 “{esc(conversation.title or '…')}”"
+
+
+def export_text(conversation, messages) -> str:
+    """A chat as a text file (plain text: no HTML)."""
+    def when(moment):
+        return formats.date_format(timezone.localtime(moment), "SHORT_DATETIME_FORMAT")
+
+    agent = _agent_of(conversation)
+    lines = [f"AIstars · {conversation.title or _('Chat')}",
+             f"{_('Agent')}: {agent_title(agent)}" if agent else _("General assistant"),
+             f"{_('Exported')}: {when(timezone.now())}", ""]
+    for message in messages:
+        who = _("AI") if message.role == "assistant" else _("You")
+        lines.append(f"— {who} · {when(message.created_at)}")
+        marks = [file_label({"kind": "photo"}) for _photo in message.photos or []]
+        marks += [file_label({**item, "kind": "document"}) for item in message.files or []]
+        if marks:
+            lines.append("[" + ", ".join(marks) + "]")
+        lines += [message.text, ""]
+    return "\n".join(lines)
 
 
 def delete_text(conversation) -> str:
     return (f"🗑 {_bold(_('Delete this chat?'))}\n\n“{esc(conversation.title or '…')}”\n\n"
-            + esc(_("Its messages are removed for good. What you were charged stays on your "
-                    "statement.")))
+            + esc(_("Its messages, memory and files are removed for good. What you were charged "
+                    "stays on your statement.")))
 
 
 def delete_keyboard(conversation):
@@ -316,7 +394,7 @@ def buy_row():
     return [{"text": "⭐ " + _("Buy credits"), "callback_data": "out:buy"}]
 
 
-def answer_keyboard(message_pk, listen_price, job, low=False):
+def answer_keyboard(message_pk, listen_price, job, low=False, files_open=0):
     """Under an answer, which is not the panel: out: buttons only."""
     first = []
     if listen_price is not None:
@@ -324,6 +402,9 @@ def answer_keyboard(message_pk, listen_price, job, low=False):
                       "callback_data": f"out:say:{message_pk}"})
     first.append(details_button(job))
     rows = [first]
+    if files_open:
+        rows.append([{"text": f"📎 {_('Close the files')} ({files_open})",
+                      "callback_data": f"out:closefiles:{job.conversation_id}"}])
     if low:
         rows.append(buy_row())
     rows.append([{"text": "➕ " + _("New chat"), "callback_data": "out:new"},
@@ -355,11 +436,9 @@ def details_text(job) -> str:
         seconds = int(sum(item.get("seconds") or 0 for item in options.get("audio") or []))
         what.append(f"{seconds // 60}:{seconds % 60:02d}")
     elif job.kind == Kind.SPEECH:
-        what.append(f"{number(len(job.prompt))} {_('characters')}")
+        what.append(f"{number(options.get('characters', len(job.prompt)))} "
+                    f"{_('characters')}")
     lines.append(" · ".join(what))
-    if job.input_tokens or job.output_tokens:
-        lines.append(_("Tokens: %(read)s read, %(wrote)s written") % {
-            "read": number(job.input_tokens), "wrote": number(job.output_tokens)})
     if job.status == Status.DONE:
         lines.append(_("Held %(hold)s, charged %(charged)s, returned %(back)s") % {
             "hold": coins(job.hold), "charged": coins(job.charged),
@@ -368,6 +447,14 @@ def details_text(job) -> str:
         lines.append(_("Not done: nothing was charged."))
     else:
         lines.append(_("Being made: %(hold)s held.") % {"hold": coins(job.hold)})
+    if job.cached_tokens:
+        lines.append(_("Tokens: %(read)s read (%(cached)s of them cheaper, from the cache), "
+                       "%(wrote)s written") % {
+            "read": number(job.input_tokens), "cached": number(job.cached_tokens),
+            "wrote": number(job.output_tokens)})
+    elif job.input_tokens or job.output_tokens:
+        lines.append(_("Tokens: %(read)s read, %(wrote)s written") % {
+            "read": number(job.input_tokens), "wrote": number(job.output_tokens)})
     return "\n".join(lines)[:200]
 
 
@@ -697,6 +784,81 @@ def finding_text() -> str:
 def asked_text(question) -> str:
     """A starter question tapped: shown as what the user asked."""
     return f"🗨 <i>{esc(question)}</i>"
+
+
+# --------------------------------------------------------------------------
+# About me
+# --------------------------------------------------------------------------
+
+ABOUT_LIMIT = 600
+
+
+def about_text(about) -> str:
+    lines = [f"📝 {_bold(_('About me'))}", "",
+             esc(_("A few lines about you that every chat gets, so the AI and the agents need "
+                   "not ask again: your country, your work, your level in a language, how you "
+                   "like answers.")), ""]
+    lines.append(f"<i>{esc(about)}</i>" if about else esc(_("Nothing yet.")))
+    return "\n".join(lines)
+
+
+def about_keyboard(has_about):
+    row = [{"text": "✏️ " + (_("Change it") if has_about else _("Write it")),
+            "callback_data": "me:edit"}]
+    if has_about:
+        row.append({"text": "🗑 " + _("Clear"), "callback_data": "me:clear"})
+    return _inline([row, nav_row("menu:profile")])
+
+
+def ask_about_text() -> str:
+    return f"📝 {_bold(_('About me'))}\n\n" + esc(
+        _("Type a few lines about yourself, up to %(limit)s characters. For example: “I live "
+          "in Romania, work as an accountant, and like short answers.”") % {
+            "limit": ABOUT_LIMIT})
+
+
+def about_too_long_text() -> str:
+    return _("That is too long. About me takes up to %(limit)s characters.") % {
+        "limit": ABOUT_LIMIT}
+
+
+def about_button():
+    return {"text": "📝 " + _("About me"), "callback_data": "me:"}
+
+
+# --------------------------------------------------------------------------
+# Privacy
+# --------------------------------------------------------------------------
+
+def privacy_text(keep_days, archive) -> str:
+    kept = (_("Your chats: their messages, and the memory the AI writes of a long chat. They "
+              "are kept until you delete them, or for %(days)s days after you last use them.")
+            % {"days": keep_days} if keep_days else
+            _("Your chats: their messages, and the memory the AI writes of a long chat. They "
+              "are kept until you delete them."))
+    keep = [kept,
+            _("What you write in About me, until you clear it."),
+            _("What each request cost, for your statement; its words go with its chat."),
+            _("Messages the safety check blocked, as the record of a strike.")]
+    if archive:
+        keep.append(_("Copies of the photos, files and voice notes you send, and of the images "
+                      "and voice notes made, in the owner's private archive channel. They go "
+                      "with their chat, where Telegram allows."))
+    see = [_("The AI provider (OpenAI or Anthropic) gets each request to answer it. OpenAI is "
+             "asked not to store it; the providers may keep requests for a short time to check "
+             "for abuse, under their own policies."),
+           _("The owner of the bot can read chats, for support and safety.")]
+    choose = [_("Delete a chat, or all of them: /chats."),
+              _("Clear About me: 👤 Profile → 📝 About me."),
+              _("To delete your account, write to /support.")]
+
+    def block(title, items):
+        return [_bold(title)] + [f"• {esc(item)}" for item in items]
+
+    return "\n".join([f"🔒 {_bold(_('Privacy'))}", "",
+                      *block(_("What is kept"), keep), "",
+                      *block(_("Who sees it"), see), "",
+                      *block(_("Your choices"), choose)])
 
 
 # --------------------------------------------------------------------------

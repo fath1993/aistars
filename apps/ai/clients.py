@@ -56,6 +56,35 @@ class Reply:
     cost_micros: int
     # Chat: the answer stopped at the model's length limit.
     cut_off: bool = False
+    # Of input_tokens: read from the provider's cache, and written to it.
+    cached_tokens: int = 0
+    written_tokens: int = 0
+
+
+@dataclass
+class Usage:
+    """Input in all, of it read from and written to the cache; output."""
+    input: int = 0
+    cached: int = 0
+    written: int = 0
+    output: int = 0
+
+    @classmethod
+    def openai(cls, usage):
+        details = (usage or {}).get("input_tokens_details") or {}
+        return cls(int((usage or {}).get("input_tokens", 0) or 0),
+                   int(details.get("cached_tokens", 0) or 0),
+                   int(details.get("cache_write_tokens", 0) or 0),
+                   int((usage or {}).get("output_tokens", 0) or 0))
+
+    @classmethod
+    def anthropic(cls, usage, output=None):
+        """Anthropic's input_tokens are only what was neither read nor written."""
+        usage = usage or {}
+        cached = int(usage.get("cache_read_input_tokens", 0) or 0)
+        written = int(usage.get("cache_creation_input_tokens", 0) or 0)
+        return cls(int(usage.get("input_tokens", 0) or 0) + cached + written, cached, written,
+                   int(usage.get("output_tokens", 0) or 0) if output is None else output)
 
 
 @dataclass
@@ -151,25 +180,30 @@ def ask(model, system: str, prompt: str, purpose: str, max_tokens: int = 4000,
 # --------------------------------------------------------------------------
 
 def chat(model, system, messages, purpose, max_tokens=None, on_text=None,
-         estimate_micros=0) -> Reply:
+         estimate_micros=0, cache_key="") -> Reply:
     """
     A conversation: `messages` are {"role": "user" | "assistant", "text",
     "images": [(bytes, media type)], "files": [{"name", "media_type",
     "data"}]}, oldest first. With `on_text`, the answer is streamed and
-    on_text(text so far) is called as it grows.
+    on_text(text so far) is called as it grows. `cache_key` (a chat's) keeps
+    its start in the provider's cache: OpenAI caches by itself, and the key
+    keeps one user's cache apart from another's; Anthropic caches only when
+    asked.
     """
     _guard(model, estimate_micros)
     max_tokens = max_tokens or model.max_output_tokens
     if model.provider.kind == ProviderKind.ANTHROPIC:
-        text, tokens_in, tokens_out, cut = _anthropic(model, system, messages, max_tokens,
-                                                      on_text)
+        text, usage, cut = _anthropic(model, system, messages, max_tokens, on_text, cache_key)
     else:
-        text, tokens_in, tokens_out, cut = _openai(model, system, messages, max_tokens,
-                                                   on_text)
-    cost = model.cost_micros(tokens_in, tokens_out)
-    _record(model, purpose, cost, f"{tokens_in} in, {tokens_out} out",
-            {"input_tokens": tokens_in, "output_tokens": tokens_out})
-    return Reply(text, tokens_in, tokens_out, cost, cut)
+        text, usage, cut = _openai(model, system, messages, max_tokens, on_text, cache_key)
+    cost = model.cost_micros(usage.input, usage.output, cached=usage.cached,
+                             written=usage.written)
+    _record(model, purpose, cost,
+            f"{usage.input} in ({usage.cached} cached, {usage.written} written), "
+            f"{usage.output} out",
+            {"input_tokens": usage.input, "cached_tokens": usage.cached,
+             "written_tokens": usage.written, "output_tokens": usage.output})
+    return Reply(text, usage.input, usage.output, cost, cut, usage.cached, usage.written)
 
 
 def _data_url(media_type, data) -> str:
@@ -191,7 +225,7 @@ def _openai_content(message):
     return parts + [{"type": "input_text", "text": message["text"]}]
 
 
-def _openai(model, system, messages, max_tokens, on_text):
+def _openai(model, system, messages, max_tokens, on_text, cache_key=""):
     """
     OpenAI's Responses API: the one that reads every kind of file (Chat
     Completions reads only PDFs). Nothing is stored at OpenAI (store false).
@@ -204,6 +238,8 @@ def _openai(model, system, messages, max_tokens, on_text):
         "max_output_tokens": max_tokens,
         "store": False,
     }
+    if cache_key:
+        payload["prompt_cache_key"] = cache_key
     url = f"{model.provider.endpoint}/v1/responses"
     if on_text is None:
         return _openai_result(_json(_post(url, _headers(model), payload)))
@@ -224,18 +260,14 @@ def _openai(model, system, messages, max_tokens, on_text):
             raise AIError(f"stream error: {event.get('message') or event}")
     if result is None:
         raise AIError("the answer stopped before it was complete")
-    usage = result.get("usage") or {}
-    return (text, int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0)),
-            _cut_off(result))
+    return text, Usage.openai(result.get("usage")), _cut_off(result)
 
 
 def _openai_result(body):
     text = "".join(part.get("text", "") for item in body.get("output") or []
                    if item.get("type") == "message"
                    for part in item.get("content") or [] if part.get("type") == "output_text")
-    usage = body.get("usage") or {}
-    return (text, int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0)),
-            _cut_off(body))
+    return text, Usage.openai(body.get("usage")), _cut_off(body)
 
 
 def _cut_off(response) -> bool:
@@ -266,30 +298,30 @@ def _anthropic_content(message):
     return parts + [{"type": "text", "text": message["text"]}]
 
 
-def _anthropic(model, system, messages, max_tokens, on_text):
+def _anthropic(model, system, messages, max_tokens, on_text, cache_key=""):
     payload = {
         "model": model.model_id, "max_tokens": max_tokens, "system": system,
         "messages": [{"role": message["role"], "content": _anthropic_content(message)}
                      for message in messages],
     }
+    if cache_key:
+        # Automatic caching: the breakpoint moves forward as the chat grows.
+        payload["cache_control"] = {"type": "ephemeral"}
     url = f"{model.provider.endpoint}/v1/messages"
     if on_text is None:
         body = _json(_post(url, _headers(model), payload))
         text = "".join(part.get("text", "") for part in body.get("content", [])
                        if part.get("type") == "text")
-        usage = body.get("usage", {})
-        return (text, int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0)),
-                body.get("stop_reason") == "max_tokens")
+        return text, Usage.anthropic(body.get("usage")), body.get("stop_reason") == "max_tokens"
 
     payload["stream"] = True
-    text, tokens_in, tokens_out, stop = "", 0, 0, ""
+    text, started, tokens_out, stop = "", {}, 0, ""
     for event in _events(url, _headers(model), payload):
         kind = event.get("type")
         if kind == "error":
             raise AIError(f"stream error: {(event.get('error') or {}).get('message', event)}")
         if kind == "message_start":
-            usage = (event.get("message") or {}).get("usage") or {}
-            tokens_in = int(usage.get("input_tokens", 0))
+            started = (event.get("message") or {}).get("usage") or {}
         elif kind == "content_block_delta":
             piece = (event.get("delta") or {}).get("text") or ""
             if piece:
@@ -298,7 +330,7 @@ def _anthropic(model, system, messages, max_tokens, on_text):
         elif kind == "message_delta":
             tokens_out = int((event.get("usage") or {}).get("output_tokens", tokens_out))
             stop = (event.get("delta") or {}).get("stop_reason") or stop
-    return text, tokens_in, tokens_out, stop == "max_tokens"
+    return text, Usage.anthropic(started, tokens_out), stop == "max_tokens"
 
 
 def _events(url, headers, payload):

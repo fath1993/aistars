@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 
 
@@ -102,6 +104,17 @@ class AIModel(models.Model):
         max_digits=10, decimal_places=4, default=0,
         help_text="Voice to text: USD per minute of audio. Text to speech: USD per 1M "
                   "characters.")
+    # The providers keep the start of a chat request (instructions, earlier
+    # messages, files) in a cache: writing it costs more than plain input,
+    # reading it again much less.
+    cache_write_factor = models.DecimalField(
+        max_digits=5, decimal_places=3, default=Decimal("1.25"),
+        help_text="Chat: input written to the provider's cache costs this times the input "
+                  "price (1.25 for 30 minutes at OpenAI, 5 minutes at Anthropic).")
+    cache_read_factor = models.DecimalField(
+        max_digits=5, decimal_places=3, default=Decimal("0.1"),
+        help_text="Chat: input read from the provider's cache costs this times the input "
+                  "price (0.1; 0.05 for GPT-6.1 Sol and Claude Sonnet 5.5).")
     max_output_tokens = models.PositiveIntegerField(
         default=4000, help_text="Chat: the longest answer, reasoning included. The hold "
                                 "before an answer is priced at this.")
@@ -151,9 +164,16 @@ class AIModel(models.Model):
     # ---- what a call costs, in micro-USD ---------------------------------
 
     def cost_micros(self, input_tokens: int, output_tokens: int,
-                    image_input_tokens: int = 0) -> int:
-        """Tokens x USD per 1M tokens is exactly micro-USD."""
-        return round(input_tokens * float(self.input_price)
+                    image_input_tokens: int = 0, cached: int = 0, written: int = 0) -> int:
+        """
+        Tokens x USD per 1M tokens is exactly micro-USD. `input_tokens` is all
+        the input; `cached` of it was read from the provider's cache and
+        `written` of it written to it.
+        """
+        price = float(self.input_price)
+        fresh = max(input_tokens - cached - written, 0)
+        return round(fresh * price + cached * price * float(self.cache_read_factor)
+                     + written * price * float(self.cache_write_factor)
                      + image_input_tokens * float(self.image_input_price)
                      + output_tokens * float(self.output_price))
 

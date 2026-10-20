@@ -93,7 +93,9 @@ class ConversationAdmin(admin.ModelAdmin):
     list_select_related = ("account", "model", "assistant")
     show_full_result_count = False
     raw_id_fields = ("account",)
-    readonly_fields = ("account", "title", "model", "assistant", "created_at", "updated_at")
+    readonly_fields = ("account", "title", "model", "assistant", "parent", "memory",
+                       "memory_upto", "closed_files", "created_at", "updated_at")
+    exclude = ("titled",)
     inlines = (MessageInline,)
 
     def has_add_permission(self, request):

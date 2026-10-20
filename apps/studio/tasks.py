@@ -60,3 +60,19 @@ def draft_agents(category_id, count=3):
                   f"{len(made)} agent(s) drafted for {category}, switched off: "
                   + ", ".join(agent.slug for agent in made))
     return len(made)
+
+
+@shared_task
+def tidy_chat(conversation_id):
+    """After an answer: name a new chat, fold old messages into its memory."""
+    from . import memory
+
+    return memory.tidy(conversation_id)
+
+
+@shared_task
+def purge_chats():
+    """Chats unused for CHAT_KEEP_DAYS go, with their words everywhere (privacy.py)."""
+    from . import privacy
+
+    return privacy.purge()

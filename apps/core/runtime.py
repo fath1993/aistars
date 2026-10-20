@@ -89,9 +89,20 @@ REGISTRY = (
               "own Telegram account (Your Telegram ID must be set). Every photo and voice "
               "note sent in, and every image and voice note made, is copied there. "
               "Empty: nothing is archived."),
-    Spec("CHAT_CONTEXT_MESSAGES", "studio", "Chat memory (messages)", kind="int", default=20,
-         help="How many earlier messages of a chat are sent with each new one, so the AI "
-              "remembers the conversation. More costs more on every message."),
+    Spec("CHAT_MEMORY_TOKENS", "studio", "Chat memory, word for word (tokens)", kind="int",
+         default=8000,
+         help="A chat's newest messages go with each new one word for word, up to about this "
+              "many tokens; older ones are summarized by AI into the chat's memory (the model "
+              "marked Default for translation, free for users), which goes with every message. "
+              "More: the AI sees more exactly, and every message costs more."),
+    Spec("CHAT_FILE_MESSAGES", "studio", "Files go with (messages)", kind="int", default=5,
+         help="A photo or file goes again with this many messages of its chat (its own "
+              "included), so follow-up questions about it work; then the chat memory keeps "
+              "what was said about it. Users can close it sooner."),
+    Spec("CHAT_KEEP_DAYS", "studio", "Delete chats unused for (days)", kind="int", default=180,
+         help="Chats nobody has used for this many days are deleted, with their words in the "
+              "requests and safety checks and their copies in the archive (amounts stay on "
+              "statements). 0: kept until the user deletes them. Stated on /privacy."),
     Spec("CHAT_MAX_MESSAGE_CHARS", "studio", "Longest message (characters)", kind="int",
          default=8000,
          help="A longer typed message, or voice note transcript, is refused with a note."),
@@ -155,7 +166,9 @@ def normalise(key: str, value: str) -> str:
 
 # Whole-number settings and the values they accept.
 RANGES = {
-    "CHAT_CONTEXT_MESSAGES": (0, 100),
+    "CHAT_MEMORY_TOKENS": (1000, 200_000),
+    "CHAT_FILE_MESSAGES": (1, 50),
+    "CHAT_KEEP_DAYS": (0, 3650),
     "CHAT_MAX_MESSAGE_CHARS": (100, 100_000),
     "JOBS_PER_USER": (1, 10),
     "CONFIRM_ABOVE_CREDITS": (0, 100_000),

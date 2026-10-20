@@ -64,6 +64,16 @@ def check(report, section):
                    "archived", "Set Your Telegram ID, then make the bot an admin of a private "
                    "channel from your own account; it is recorded by itself.", section)
 
+    writer = AIModel.translation_default()
+    if panel.demo_mode or (writer is not None and writer.usable):
+        report.add(OK, "Chat memory", f"{runtime.get('CHAT_MEMORY_TOKENS')} tokens word for "
+                   f"word, older messages summarized by {writer or 'Demo mode'}", "", section)
+    else:
+        report.add(WARN, "Chat memory", "no usable model marked Default for translation: long "
+                   "chats are not summarized, their oldest messages are just left out",
+                   "AI → Models: tick Default for translation on a cheap chat model with a key.",
+                   section)
+
     stuck = Job.objects.filter(status__in=ACTIVE,
                                created_at__lt=timezone.now() - timedelta(minutes=10)).count()
     if stuck:
