@@ -147,7 +147,7 @@ def transcribe(job):
         if text:
             from . import chat
 
-            conversation = Conversation.objects.filter(pk=job.conversation_id).first()
+            conversation = Conversation.of(job.account).filter(pk=job.conversation_id).first()
             chat.send(job.account, job.chat_id, text, voice=True, conversation=conversation,
                       attachments=job.options.get("attachments") or [])
         return

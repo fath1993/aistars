@@ -68,11 +68,3 @@ def tidy_chat(conversation_id):
     from . import memory
 
     return memory.tidy(conversation_id)
-
-
-@shared_task
-def purge_chats():
-    """Chats unused for CHAT_KEEP_DAYS go, with their words everywhere (privacy.py)."""
-    from . import privacy
-
-    return privacy.purge()

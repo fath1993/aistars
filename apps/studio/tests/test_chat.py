@@ -353,7 +353,8 @@ class ChatScreenTests(StudioTestCase):
         self.tap(f"chat:del:{first.pk}")
         self.assertIn("Delete this chat?", self.last_text())
         self.assertEqual(self.tap(f"chat:delok:{first.pk}"), "🗑 Deleted")
-        self.assertFalse(Conversation.objects.filter(pk=first.pk).exists())
+        self.assertTrue(Conversation.objects.get(pk=first.pk).deleted, "only marked")
+        self.assertNotIn(f"chat:open:{first.pk}", self.buttons())
         self.assertEqual(ledger.balance(self.account), 497, "what was charged stays charged")
 
     def test_another_users_chat_cannot_be_opened(self):

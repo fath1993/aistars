@@ -18,7 +18,7 @@ from django.utils import timezone
 from apps.core import runtime
 
 from . import catalog
-from .models import Assistant, Category
+from .models import Assistant, Category, Conversation
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ def toggle_saved(account, agent) -> bool:
 def recent(account, limit=PER_PAGE) -> list:
     """The agents of the user's latest chats, newest first, once each."""
     found = []
-    for agent_id in account.conversations.exclude(assistant=None).order_by(
+    for agent_id in Conversation.of(account).exclude(assistant=None).order_by(
             "-updated_at").values_list("assistant_id", flat=True)[:50]:
         if agent_id not in found:
             found.append(agent_id)

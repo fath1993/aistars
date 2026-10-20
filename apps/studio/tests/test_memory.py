@@ -2,19 +2,14 @@
 What a chat remembers: the newest messages word for word within a budget,
 older ones folded by AI into the chat's memory; names for new chats; files
 that go again for a few messages and can be closed; starting fresh with the
-memory; About me; exporting and searching chats; and privacy: deleting a
-chat everywhere, deleting chats unused for long, /privacy.
+memory; About me; exporting and searching chats; deleting a chat (it only
+goes from the user's chats); and /privacy.
 """
-from datetime import timedelta
-
-from django.utils import timezone
-
 from apps.ai.models import AIModel
 from apps.core import runtime
 from apps.core.models import Account
-from apps.safety.models import Result, Screening
-from apps.studio import chat, memory, privacy
-from apps.studio.models import Conversation, Job, Message, Status
+from apps.studio import chat, memory
+from apps.studio.models import Conversation, Job, Message
 
 from .base import StudioTestCase
 
@@ -315,29 +310,66 @@ class ChatsTests(StudioTestCase):
 
 
 @runtime.override(ARCHIVE_CHAT_ID=ARCHIVE)
-class PrivacyTests(StudioTestCase):
-    def test_deleting_a_chat_removes_its_words_everywhere(self):
-        self.send_photo("photo-1", caption="My passport photo, private")
-        job = Job.objects.get()
-        self.assertTrue(job.archive_ids)
-        conversation = job.conversation
-        self.tap(f"chat:delok:{conversation.pk}")
-        job.refresh_from_db()
-        self.assertEqual((job.prompt, job.photos, job.archive_ids, job.charged),
-                         ("", [], [], 1), "the amount stays for the statement")
-        self.assertEqual(job.screening.prompt, "")
-        self.assertFalse(Message.objects.exists())
-        deleted = self.tg.last("deleteMessages")
-        self.assertEqual(deleted["chat_id"], ARCHIVE)
+class DeleteTests(StudioTestCase):
+    """A chat the user deletes is gone from their chats; everything stays with the owner."""
 
-    def test_a_blocked_message_stays_as_the_record(self):
-        self.say("Hi")
-        conversation = Conversation.objects.get()
-        blocked = Screening.objects.create(account=self.account, tool="chat", model="x",
-                                           prompt="something forbidden", result=Result.BLOCKED)
-        Job.objects.filter(conversation=conversation).update(screening=blocked)
-        privacy.delete_chat(conversation)
-        self.assertEqual(Screening.objects.get(pk=blocked.pk).prompt, "something forbidden")
+    def test_deleting_a_chat_only_hides_it(self):
+        self.send_photo("photo-1", caption="My passport photo")
+        job = Job.objects.get()
+        conversation = job.conversation
+        self.tap(f"chat:del:{conversation.pk}")
+        self.assertIn("It goes from your chats, with its messages.", self.last_text())
+        self.tg.calls.clear()
+        self.assertEqual(self.tap(f"chat:delok:{conversation.pk}"), "🗑 Deleted")
+        conversation.refresh_from_db()
+        job.refresh_from_db()
+        self.assertTrue(conversation.deleted)
+        self.assertEqual(conversation.messages.count(), 2, "kept here")
+        self.assertEqual((job.prompt, job.photos), ("My passport photo", ["photo-1"]))
+        self.assertEqual(job.screening.prompt, "My passport photo")
+        self.assertNotIn("deleteMessage", " ".join(self.tg.methods()), "the archive keeps it")
+        self.assertIn("No chats yet", self.last_text())
+
+    def test_a_deleted_chat_is_nowhere_for_the_user(self):
+        self.tap("ag:start:chef")
+        self.say("Pancakes?")
+        deleted = Conversation.objects.get()
+        chat.delete(deleted)
+        self.assertIsNone(chat.current(self.account))
+        self.assertEqual(chat.listed(self.account), ([], False))
+        self.assertEqual(chat.search_chats(self.account, "Pancakes"), [])
+        self.tap(f"chat:open:{deleted.pk}")
+        self.assertNotIn("Pancakes", self.last_text())
+        from apps.studio import agents
+
+        self.assertEqual(agents.recent(self.account), [])
+        self.say("A new question")
+        self.assertNotEqual(Job.objects.order_by("id").last().conversation, deleted)
+        self.assertEqual(self.said(), [("user", "A new question")])
+
+    def test_a_failed_answer_of_a_deleted_chat_is_not_tried_again(self):
+        self.openai.fail["responses"] = (500, "down")
+        self.say("Hello?")
+        job = Job.objects.get()
+        chat.delete(job.conversation)
+        del self.openai.fail["responses"]
+        self.tap(f"out:retry:{job.pk}", message_id=job.message_id)
+        self.assertIn("You deleted that chat", self.last_text())
+        self.assertEqual(Job.objects.count(), 1)
+
+    def test_a_voice_note_heard_after_its_chat_was_deleted_goes_to_a_chat_they_have(self):
+        from unittest import mock
+
+        from apps.studio import jobs
+
+        with mock.patch.object(jobs, "launch"):
+            self.send_voice()
+        heard = Job.objects.get(kind="transcribe")
+        chat.delete(heard.conversation)
+        jobs.run(heard.pk)
+        answer = Job.objects.get(kind="chat")
+        self.assertFalse(answer.conversation.deleted)
+        self.assertNotEqual(answer.conversation, heard.conversation)
 
     def test_deleting_all_chats(self):
         self.say("One")
@@ -346,41 +378,27 @@ class PrivacyTests(StudioTestCase):
         self.tap("chat:list:0")
         self.tap("chat:delall")
         self.assertIn("Delete all your chats?", self.last_text())
-        self.assertIn("2 chats", self.last_text())
+        self.assertIn("2 chats go from your chats", self.last_text())
         self.assertEqual(self.tap("chat:delallok"), "🗑 Deleted: 2")
-        self.assertFalse(Conversation.objects.exists())
-        self.assertEqual(set(Job.objects.values_list("prompt", flat=True)), {""})
+        self.assertEqual(Conversation.objects.filter(deleted=True).count(), 2)
+        self.assertEqual(Message.objects.count(), 4)
 
-    def test_chats_unused_for_long_go_by_themselves(self):
-        from apps.studio import tasks
+    def test_the_owner_sees_them_marked(self):
+        from django.contrib.auth.models import User
 
-        self.say("Old")
-        old = Conversation.objects.get()
-        Conversation.objects.filter(pk=old.pk).update(
-            updated_at=timezone.now() - timedelta(days=181))
-        image = Job.objects.create(account=self.account, kind="image",
-                                   model=AIModel.objects.get(model_id="gpt-6-luna"), chat_id=42,
-                                   status=Status.DONE, prompt="A red bicycle")
-        Job.objects.filter(pk=image.pk).update(created_at=timezone.now() - timedelta(days=181))
-        self.tap("chat:general")
-        self.say("New")
-        self.assertEqual(tasks.purge_chats(), 1)
-        self.assertFalse(Conversation.objects.filter(pk=old.pk).exists())
-        self.assertEqual(Conversation.objects.count(), 1)
-        self.assertEqual(Job.objects.get(pk=image.pk).prompt, "")
-
-    @runtime.override(CHAT_KEEP_DAYS=0)
-    def test_kept_until_deleted_when_the_owner_says_so(self):
-        self.say("Old")
-        Conversation.objects.update(updated_at=timezone.now() - timedelta(days=999))
-        self.assertEqual(privacy.purge(), 0)
-        self.assertTrue(Conversation.objects.exists())
+        self.say("Hello")
+        conversation = Conversation.objects.get()
+        chat.delete(conversation)
+        self.client.force_login(User.objects.create_superuser("o", "o@example.com", "pw"))
+        page = self.client.get("/admin/studio/conversation/?deleted__exact=1")
+        self.assertContains(page, f"/admin/studio/conversation/{conversation.pk}/change/")
 
     def test_the_privacy_page(self):
         self.say("/privacy")
         text = self.last_text()
         self.assertIn("🔒 <b>Privacy</b>", text)
-        self.assertIn("for 180 days after you last use them", text)
+        self.assertIn("A chat you delete is gone from your chats; the owner keeps a record of it.",
+                      text)
         self.assertIn("in the owner's private archive channel", text)
         self.assertIn("The owner of the bot can read chats, for support and safety.", text)
         self.tap("menu:profile")

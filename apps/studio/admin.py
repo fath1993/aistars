@@ -85,10 +85,13 @@ class MessageInline(admin.TabularInline):
 
 @admin.register(Conversation)
 class ConversationAdmin(admin.ModelAdmin):
-    """For support: what a user asked and was answered. Users delete their own."""
+    """
+    For support: what a user asked and was answered. A chat the user deleted
+    is only marked Deleted: gone from their chats, kept here.
+    """
 
-    list_display = ("__str__", "account", "model", "assistant", "updated_at")
-    list_filter = ("model", "assistant")
+    list_display = ("__str__", "account", "model", "assistant", "deleted", "updated_at")
+    list_filter = ("deleted", "model", "assistant")
     search_fields = ("=id", "account__telegram_user_id", "account__username", "title")
     list_select_related = ("account", "model", "assistant")
     show_full_result_count = False

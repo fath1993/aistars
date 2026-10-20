@@ -99,10 +99,6 @@ REGISTRY = (
          help="A photo or file goes again with this many messages of its chat (its own "
               "included), so follow-up questions about it work; then the chat memory keeps "
               "what was said about it. Users can close it sooner."),
-    Spec("CHAT_KEEP_DAYS", "studio", "Delete chats unused for (days)", kind="int", default=180,
-         help="Chats nobody has used for this many days are deleted, with their words in the "
-              "requests and safety checks and their copies in the archive (amounts stay on "
-              "statements). 0: kept until the user deletes them. Stated on /privacy."),
     Spec("CHAT_MAX_MESSAGE_CHARS", "studio", "Longest message (characters)", kind="int",
          default=8000,
          help="A longer typed message, or voice note transcript, is refused with a note."),
@@ -168,7 +164,6 @@ def normalise(key: str, value: str) -> str:
 RANGES = {
     "CHAT_MEMORY_TOKENS": (1000, 200_000),
     "CHAT_FILE_MESSAGES": (1, 50),
-    "CHAT_KEEP_DAYS": (0, 3650),
     "CHAT_MAX_MESSAGE_CHARS": (100, 100_000),
     "JOBS_PER_USER": (1, 10),
     "CONFIRM_ABOVE_CREDITS": (0, 100_000),

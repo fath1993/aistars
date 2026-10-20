@@ -118,12 +118,19 @@ class Conversation(models.Model):
     # 🧹 Start fresh: the chat this one carries the memory of.
     parent = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL,
                                related_name="+")
+    deleted = models.BooleanField(
+        default=False, help_text="Deleted by the user: gone from their chats, kept here.")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True, db_index=True)
 
     class Meta:
         ordering = ("-updated_at",)
         indexes = [models.Index(fields=["account", "-updated_at"])]
+
+    @classmethod
+    def of(cls, account):
+        """The user's chats: the ones they deleted are not theirs to see."""
+        return cls.objects.filter(account=account, deleted=False)
 
     def __str__(self):
         return self.title or f"Chat #{self.pk}"
@@ -219,8 +226,6 @@ class Job(models.Model):
     result_file_id = models.CharField(max_length=255, blank=True)
     original_file_id = models.CharField(max_length=255, blank=True)
     archive_message_id = models.BigIntegerField(null=True, blank=True)
-    # The archive's copies of what the user sent (removed with the chat).
-    archive_ids = models.JSONField(default=list, blank=True)
     error = models.CharField(max_length=500, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)

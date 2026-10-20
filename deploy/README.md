@@ -205,37 +205,12 @@ visitor ⇄ HTTPS ⇄ Cloudflare ⇄ HTTP ⇄ edge (server-edge, Traefik, :80) �
   Models: 1.25 and 0.1; 0.05 for GPT-6.1 Sol and Claude Sonnet 5.5) price
   what the provider reports, so users pay less for long chats and files they
   keep asking about; holds count all input at the write price.
-- **Privacy:** deleting a chat (or **Delete all**) removes its messages and
-  memory, its words from the requests and passed safety checks (amounts stay
-  on statements; blocked messages stay as the record of a strike), and its
-  copies in the archive channel. Chats unused for **Delete chats unused for
-  (days)** (180; 0 keeps them) go every night at 03:40 UTC, with the words
-  of older requests. Give the bot the **Delete messages** right in the
-  archive channel: without it, Telegram lets it delete copies only for 48
-  hours (the activity log says when some stay). `/privacy` (also Profile →
-  🔒 Privacy) tells users all this, and that you can read chats.
-- **🧩 Agents:** AI assistants made for one job, each with its own
-  instructions (in English; it answers in the user's language), starter
-  questions users can tap, and optionally its own model. 39 to start with, in
-  10 categories (AI tools → **Categories** and **Agents**). Users browse by
-  category, search by words (name, line and **search words**, in English and
-  their language), or tap **✨ Find for me** and describe their need (the
-  model marked Default for translation picks; free for users, **Find for me,
-  per user a day** in Runtime settings). Each agent has a card (what it does,
-  its questions, its model and everyday price, ▶️ Start, ⭐ Save, 📤 Share
-  with a link `t.me/<bot>?start=agent_<slug>` that opens the card, even for
-  someone who still has to register). **Featured** agents are offered first
-  in ➕ New chat. The Agents list shows each one's chats and credits charged.
-  Category → action **Draft 3 new agents with AI** writes agents for it,
-  switched off, for you to read and switch on.
-- **What things cost:** every answer, image and voice result ends with what
-  it cost and the balance; **🧾 Details** shows the model, agent, tokens and
-  the hold (charged, returned). A chat message that can cost more than **Ask
-  before sending above** (Runtime settings, 🪙 20) waits for **Send**; once
-  agreed in a chat, only one that can cost half as much again asks. Below
-  **Low balance warning**, results say so with a Buy credits button.
-  **📊 Usage** (home, `/usage`) shows today, 7 and 30 days, by tool, agent and
-  model, the last requests, and a daily limit users may set themselves.
+- **Deleting:** a chat the user deletes (or **Delete all**) is only marked
+  **Deleted** (AI tools → Conversations, filter Deleted): it is gone from
+  their chats, everything stays in the database, and nothing is ever deleted
+  from the archive channel. `/privacy` (also Profile → 🔒 Privacy) tells
+  users what is kept, that a deleted chat stays with you, and that you can
+  read chats.
 - **Commands:** `/new`, `/agents`, `/chats`, `/usage`, `/images`, `/voice`,
   `/privacy`, `/menu`, `/help` (typed; there is no ☰ command list).
 - **🎨 Images:** Create an image from a description, or Edit a photo (or

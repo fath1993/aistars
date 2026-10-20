@@ -63,7 +63,7 @@ def profile(account) -> Profile:
 
 
 def current(account):
-    return (Conversation.objects.filter(account=account)
+    return (Conversation.of(account)
             .select_related("model", "model__provider", "assistant").first())
 
 
@@ -90,6 +90,15 @@ def new_conversation(account, assistant=None) -> Conversation:
     return Conversation.objects.create(account=account, model=model, assistant=assistant)
 
 
+def delete(conversation):
+    """🗑 by the user: gone from their chats; everything stays here."""
+    Conversation.objects.filter(pk=conversation.pk).update(deleted=True)
+
+
+def delete_all(account) -> int:
+    return Conversation.of(account).update(deleted=True)
+
+
 def start_fresh(account, old) -> Conversation:
     """🧹 A new chat with the same agent, which remembers what matters of `old`."""
     agent = old.assistant if old.assistant_id and old.assistant.active else None
@@ -109,7 +118,7 @@ def choose_model(account, conversation, model):
 
 def listed(account, page=0, per_page=8):
     """(chats with messages, newest first; has_more)."""
-    rows = list(Conversation.objects.filter(account=account)
+    rows = list(Conversation.of(account)
                 .annotate(count=Count("messages")).filter(count__gt=0).order_by("-updated_at")
                 [page * per_page:(page + 1) * per_page + 1])
     return rows[:per_page], len(rows) > per_page
@@ -135,7 +144,7 @@ def search_chats(account, words, limit=8) -> list:
     from django.db.models import Q
 
     words = " ".join(words.split())[:100]
-    return list(Conversation.objects.filter(account=account).filter(
+    return list(Conversation.of(account).filter(
         Q(title__icontains=words) | Q(messages__text__icontains=words)).distinct()
         .order_by("-updated_at")[:limit])
 
@@ -212,6 +221,8 @@ def send(account, chat_id, text, attachments=(), voice=False, conversation=None,
     limit = int(runtime.get("CHAT_MAX_MESSAGE_CHARS"))
     if len(text) > limit:
         return _notice(chat_id, texts.too_long_text(limit))
+    if conversation is not None and conversation.deleted:
+        conversation = None   # deleted while its voice note was being heard
     conversation = conversation or current(account) or new_conversation(account)
     model = model_of(account, conversation)
     if model is None:
@@ -307,8 +318,8 @@ def send_confirmed(account, chat_id, new_chat=False):
     if draft.get("step") != "confirm_send":
         return False
     state.stop(account)
-    conversation = Conversation.objects.filter(
-        pk=draft.get("conversation"), account=account).select_related("assistant").first()
+    conversation = Conversation.of(account).filter(
+        pk=draft.get("conversation")).select_related("assistant").first()
     if conversation is not None and new_chat:
         conversation = start_fresh(account, conversation)
     send(account, chat_id, draft["text"], attachments=draft.get("attachments") or [],
@@ -341,6 +352,8 @@ def retry(account, chat_id, failed_job):
         "conversation").first()
     if message is None or failed_job.account_id != account.pk:
         return _notice(chat_id, texts.no_model_text())
+    if message.conversation.deleted:
+        return _notice(chat_id, texts.chat_deleted_text())
     conversation = message.conversation
     model = model_of(account, conversation)
     if model is None:

@@ -18,7 +18,7 @@ from apps.core import menus
 from apps.core.i18n import gettext as _
 from apps.core.services import telegram, ui
 
-from . import agents, catalog, chat, images, jobs, memory, privacy, state, texts, usage, voice
+from . import agents, catalog, chat, images, jobs, memory, state, texts, usage, voice
 from .models import Category, Conversation, Job, Message, Role
 
 COMMANDS = ("new", "chat", "chats", "agents", "usage", "images", "voice")
@@ -179,7 +179,7 @@ def _chat_screen(account, chat_id, fresh=False, conversation=None, opened=False)
     conversation = conversation or chat.current(account)
     model = chat.model_of(account, conversation)
     count = conversation.messages.count() if conversation is not None else 0
-    has_chats = Conversation.objects.filter(account=account, messages__isnull=False).exists()
+    has_chats = Conversation.of(account).filter(messages__isnull=False).exists()
     typical = chat.typical_price(model) if model is not None else None
     going = chat.open_files(conversation, model)
     folded = memory.folded_count(conversation) if conversation is not None else 0
@@ -211,8 +211,8 @@ def _chats(account, chat_id, page, fresh=False):
 
 
 def _own_conversation(account, value):
-    return Conversation.objects.filter(pk=int(value) if value.isdigit() else 0,
-                                       account=account).select_related("assistant").first()
+    return Conversation.of(account).filter(
+        pk=int(value) if value.isdigit() else 0).select_related("assistant").first()
 
 
 def _chat(account, chat_id, action, value):
@@ -257,11 +257,10 @@ def _chat(account, chat_id, action, value):
         state.wait(account, "chat_search")
         _show(account, chat_id, texts.search_chats_text(), menus.back_keyboard("chat:list:0"))
     elif action == "delall":
-        count = Conversation.objects.filter(account=account, messages__isnull=False) \
-            .distinct().count()
+        count = Conversation.of(account).filter(messages__isnull=False).distinct().count()
         _show(account, chat_id, texts.delete_all_text(count), texts.delete_all_keyboard())
     elif action == "delallok":
-        count = privacy.delete_all(account)
+        count = chat.delete_all(account)
         _chat(account, chat_id, "list", "0")
         return "🗑 " + _("Deleted: %(count)s") % {"count": count}
     elif action == "del":
@@ -273,7 +272,7 @@ def _chat(account, chat_id, action, value):
     elif action == "delok":
         conversation = _own_conversation(account, value)
         if conversation is not None:
-            privacy.delete_chat(conversation)
+            chat.delete(conversation)
         _chat(account, chat_id, "list", "0")
         return "🗑 " + _("Deleted")
     else:
@@ -501,11 +500,9 @@ def profile_buttons(account) -> list:
 
 
 def privacy_text() -> str:
-    from apps.core import runtime
-
     from . import archive
 
-    return texts.privacy_text(int(runtime.get("CHAT_KEEP_DAYS")), bool(archive.chat_id()))
+    return texts.privacy_text(bool(archive.chat_id()))
 
 
 # ---- Usage ----------------------------------------------------------------

@@ -336,8 +336,8 @@ def search_chats_text() -> str:
 
 def delete_all_text(count) -> str:
     return (f"🗑 {_bold(_('Delete all your chats?'))}\n\n"
-            + esc(_("%(count)s chats and their messages, memories and files are removed for "
-                    "good. What you were charged stays on your statement.") % {"count": count}))
+            + esc(_("%(count)s chats go from your chats, with their messages. What you were "
+                    "charged stays on your statement.") % {"count": count}))
 
 
 def delete_all_keyboard():
@@ -371,8 +371,8 @@ def export_text(conversation, messages) -> str:
 
 def delete_text(conversation) -> str:
     return (f"🗑 {_bold(_('Delete this chat?'))}\n\n“{esc(conversation.title or '…')}”\n\n"
-            + esc(_("Its messages, memory and files are removed for good. What you were charged "
-                    "stays on your statement.")))
+            + esc(_("It goes from your chats, with its messages. What you were charged stays "
+                    "on your statement.")))
 
 
 def delete_keyboard(conversation):
@@ -479,6 +479,10 @@ def retry_keyboard(job):
 
 def busy_text() -> str:
     return "⏳ " + _("Still answering your last message. Send this one when the answer is here.")
+
+
+def chat_deleted_text() -> str:
+    return _("You deleted that chat. Ask again in a chat you have.")
 
 
 def too_many_text() -> str:
@@ -830,27 +834,22 @@ def about_button():
 # Privacy
 # --------------------------------------------------------------------------
 
-def privacy_text(keep_days, archive) -> str:
-    kept = (_("Your chats: their messages, and the memory the AI writes of a long chat. They "
-              "are kept until you delete them, or for %(days)s days after you last use them.")
-            % {"days": keep_days} if keep_days else
-            _("Your chats: their messages, and the memory the AI writes of a long chat. They "
-              "are kept until you delete them."))
-    keep = [kept,
+def privacy_text(archive) -> str:
+    keep = [_("Your chats: their messages, and the memory the AI writes of a long chat. A chat "
+              "you delete is gone from your chats; the owner keeps a record of it."),
             _("What you write in About me, until you clear it."),
-            _("What each request cost, for your statement; its words go with its chat."),
-            _("Messages the safety check blocked, as the record of a strike.")]
+            _("Your requests and what each cost, for your statement."),
+            _("The safety checks of your messages.")]
     if archive:
         keep.append(_("Copies of the photos, files and voice notes you send, and of the images "
-                      "and voice notes made, in the owner's private archive channel. They go "
-                      "with their chat, where Telegram allows."))
+                      "and voice notes made, in the owner's private archive channel."))
     see = [_("The AI provider (OpenAI or Anthropic) gets each request to answer it. OpenAI is "
              "asked not to store it; the providers may keep requests for a short time to check "
              "for abuse, under their own policies."),
            _("The owner of the bot can read chats, for support and safety.")]
-    choose = [_("Delete a chat, or all of them: /chats."),
+    choose = [_("Delete a chat, or all of them, from your chats: /chats."),
               _("Clear About me: 👤 Profile → 📝 About me."),
-              _("To delete your account, write to /support.")]
+              _("For anything else about your data, write to /support.")]
 
     def block(title, items):
         return [_bold(title)] + [f"• {esc(item)}" for item in items]

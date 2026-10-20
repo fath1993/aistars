@@ -50,6 +50,28 @@ touches one, update it in the same change.
 
 ## Changelog
 
+### 2026-10-21 — v0.4.1 — Deleting a chat only hides it from the user
+
+The owner: nothing is ever deleted from the archive channel, and a user's
+delete does not delete from the database: the user no longer has the chat
+and it is not shown to them; on our side it is only a checkbox, "deleted".
+v0.4.0 had deleting a chat clear its words from requests and safety checks
+and delete its archive copies, and chats unused for 180 days deleted every
+night. All of that is gone:
+- Conversation **deleted** (a checkbox in AI tools → Conversations, with a
+  filter). 🗑 Delete and Delete all set it; messages, memory, requests,
+  safety checks and archive copies all stay.
+- Everything the user sees leaves deleted chats out (`Conversation.of`): the
+  current chat, My chats, search, Recent agents, opening and closing files,
+  a confirmed message, a voice note heard after its chat was deleted (it goes
+  to a chat they have), and Try again ("You deleted that chat").
+- No nightly purge, no **Delete chats unused for (days)** setting, no
+  archive deletion (and no record of archive copies per request: migration
+  0006, not deployed yet, regenerated).
+- The confirmations say the chat "goes from your chats"; `/privacy` says a
+  deleted chat is gone from the user's chats and the owner keeps a record,
+  and lists the requests, safety checks and archive copies as kept.
+
 ### 2026-10-20 — v0.4.0 — Chat memory, files that close, caching, privacy
 
 The owner asked how chat history is handled. As built, the last 20 messages
