@@ -47,5 +47,10 @@ class EdgeRoutingTests(SimpleTestCase):
         self.assertIn("X-Forwarded-Proto $http_x_forwarded_proto", text)
         self.assertNotIn("X-Forwarded-Proto $scheme", text)
 
-    def test_the_project_nginx_proxies_to_the_app_service(self):
-        self.assertIn("proxy_pass http://aistars:8000;", NGINX_CONF.read_text())
+    def test_the_project_nginx_finds_the_app_at_every_request(self):
+        # A hostname in proxy_pass is looked up once, when nginx starts; a
+        # recreated app container on a new address then gets nothing but 502s.
+        text = NGINX_CONF.read_text()
+        self.assertIn("resolver 127.0.0.11", text)
+        self.assertIn("set $app http://aistars:8000;", text)
+        self.assertIn("proxy_pass $app;", text)

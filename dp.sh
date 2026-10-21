@@ -68,6 +68,10 @@ fi
 
 echo "=== Building and starting containers ==="
 docker compose up -d --build
+# nginx is recreated every time: compose leaves it running when only the app
+# changed, and a running nginx keeps the config file and static folder it was
+# started with (git replaces files, it does not edit them in place).
+docker compose up -d --no-deps --force-recreate nginx
 EOF
 
 # No host nginx step: the project's nginx runs in its own container (config

@@ -37,9 +37,9 @@ touches one, update it in the same change.
 3. **Containers.** Docker Compose with a pinned project name and its own network. The database and Redis publish no ports. Admin-only tools (pgAdmin) bind to 127.0.0.1.
 4. **HTTPS.** Cloudflare does HTTPS for every domain: a proxied DNS record, SSL mode Flexible. Cloudflare to the server is plain HTTP, permanently. There are no certificates on the server and nothing listens on port 443.
 5. **Edge.** The server runs one edge proxy, the `server-edge` repo (Traefik), on port 80. It routes each domain to the project that claims it and passes Cloudflare's `X-Forwarded-For` and `X-Forwarded-Proto` through. No project edits the host nginx.
-6. **Project nginx.** Each web project has its own nginx container, configured in `deploy/nginx/` in its repo. It serves static files read-only from `/var/www/<project>/static` and public media read-only from the project's media folder, and proxies the rest to the app, passing `X-Forwarded-Proto $http_x_forwarded_proto`, never `$scheme`. Files the app serves itself (WhiteNoise static, media only admins may see) stay with the app.
+6. **Project nginx.** Each web project has its own nginx container, configured in `deploy/nginx/` in its repo. It serves static files read-only from `/var/www/<project>/static` and public media read-only from the project's media folder, and proxies the rest to the app, passing `X-Forwarded-Proto $http_x_forwarded_proto`, never `$scheme`. It looks the app up by name at every request (`resolver 127.0.0.11` and a variable in `proxy_pass`), never once at start. Files the app serves itself (WhiteNoise static, media only admins may see) stay with the app.
 7. **Routing.** The project nginx carries the edge labels: `traefik.enable=true`, `traefik.docker.network=<project network>`, `Host(<domain>)`, entry point `web`, port 80. The domain equals `ALLOWED_HOSTS` in `.env`, checked by a test. A new domain needs only a proxied Cloudflare DNS record.
-8. **Deploy script (`dp.sh`).** Runs as root. Deploys a given commit, refused unless it is on `main`, or the latest `main`. Rebuilds the containers (the app migrates on start), fixes ownership and permissions, waits for migrations, runs `doctor --strict`, and exits non-zero if it fails. A project without a database waits for the app to answer instead of for migrations.
+8. **Deploy script (`dp.sh`).** Runs as root. Deploys a given commit, refused unless it is on `main`, or the latest `main`. Rebuilds the containers (the app migrates on start) and recreates the project nginx (a running nginx keeps the config and folders it started with), fixes ownership and permissions, waits for migrations, runs `doctor --strict`, and exits non-zero if it fails. A project without a database waits for the app to answer instead of for migrations.
 9. **CI/CD.** `.github/workflows/deploy.yml`: on every push to `main`, the tests and (Django) the missing-migration check, then a deploy of that exact commit over SSH. One deploy at a time; **Run workflow** redeploys.
 10. **Deploy key.** One SSH key per project, made on the server with `setup-deploy-key.sh <project>` from `server-edge`. GitHub secrets `DEPLOY_HOST`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`. Locked in root's `authorized_keys` to the project's `deploy/ci-deploy.sh`, which accepts only a commit ID. The host key is pinned, and the private key is deleted from the server after setup.
 11. **Health.** `doctor` (`manage.py doctor`, or `doctor.py` without Django) checks the configuration and every external service the app needs, and prints the fix for each failure. Where the admin has a System status page, it shows the same checks. Every new external service or required setting gets a check.
@@ -49,6 +49,25 @@ touches one, update it in the same change.
 15. **Firewall.** The server sits behind a Hetzner Cloud Firewall (`FIREWALL.md` in `server-edge`): SSH (22) open, HTTP (80) only from Cloudflare's IP ranges, everything else closed, so the server's IP answers nothing on its own. A project never needs a firewall change.
 
 ## Changelog
+
+### 2026-10-21 — v0.4.2 — Keep the project nginx pointed at the app
+
+After the server's edge took over port 80, aistars.myshortclip.com answered
+5xx for every page and 404 for static files, while the other sites worked.
+The project nginx had been started by the first manual deploy; the GitHub
+deploy then recreated the app (and Celery) containers, which can come back
+on other addresses, and nginx had looked `aistars` up once, at start, so it
+kept sending requests to the old address. It also keeps the config file and
+static folder it was started with: git replaces files rather than editing
+them, so a changed `deploy/nginx/aistars.conf` never reached it, and compose
+does not recreate nginx when only the app changed.
+- `deploy/nginx/aistars.conf`: the app is looked up at every request through
+  Docker's DNS (`resolver 127.0.0.11 valid=10s`, `proxy_pass $app`).
+- `dp.sh`: after the build, nginx is recreated every deploy
+  (`up -d --no-deps --force-recreate nginx`), about a second without it.
+- Deployment standard items 6 and 8 say both, so every project does the
+  same (MyShortClip has the same two gaps).
+- Tests for both.
 
 ### 2026-10-21 — v0.4.1 — Deleting a chat only hides it from the user
 

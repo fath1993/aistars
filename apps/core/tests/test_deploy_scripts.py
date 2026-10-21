@@ -65,3 +65,10 @@ class DeployScriptTests(SimpleTestCase):
         first_cd = code.index('cd "$APP_DIR"')
         first_compose = next(i for i, line in enumerate(code) if "docker compose" in line)
         self.assertLess(first_cd, first_compose)
+
+    def test_nginx_is_recreated_after_the_build(self):
+        # A running nginx keeps the config file and static folder it started
+        # with; compose would leave it running when only the app changed.
+        lines = [line.strip() for line in DP_SH.read_text().splitlines()]
+        self.assertGreater(lines.index("docker compose up -d --no-deps --force-recreate nginx"),
+                           lines.index("docker compose up -d --build"))
