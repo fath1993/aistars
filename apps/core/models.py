@@ -396,3 +396,42 @@ class ActivityLog(models.Model):
 
     def __str__(self):
         return f"[{self.level}] {self.category}/{self.event}"
+
+
+class UpdateOutcome(models.TextChoices):
+    RECEIVED = "received", "Being handled"
+    HANDLED = "handled", "Handled"
+    FAILED = "failed", "Failed"
+    REJECTED = "rejected", "Rejected (wrong secret)"
+
+
+class TelegramUpdate(models.Model):
+    """
+    Every update Telegram sent the webhook, as it came (updates.py): to see
+    what a user really sent, whether Telegram sent something at all, and what
+    went wrong. Kept for TELEGRAM_UPDATES_KEEP_DAYS.
+    """
+
+    # Null for a rejected one: its body is not trusted, so it never blocks the
+    # real update with the same ID.
+    update_id = models.BigIntegerField(null=True, blank=True, unique=True)
+    kind = models.CharField(max_length=32, blank=True, db_index=True,
+                            help_text="message, callback_query, my_chat_member…")
+    user_id = models.BigIntegerField(null=True, blank=True, db_index=True,
+                                     help_text="The Telegram user (or chat) it came from.")
+    summary = models.CharField(max_length=200, blank=True)
+    payload = models.JSONField(default=dict, blank=True)
+    outcome = models.CharField(max_length=10, choices=UpdateOutcome.choices,
+                               default=UpdateOutcome.RECEIVED, db_index=True)
+    # Telegram sends an update again when the answer was slow: handled once.
+    deliveries = models.PositiveSmallIntegerField(default=1)
+    error = models.TextField(blank=True)
+    received_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    handled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-received_at", "-id"]
+        verbose_name = "Telegram update"
+
+    def __str__(self):
+        return f"{self.update_id or '—'} {self.kind}"

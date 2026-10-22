@@ -88,6 +88,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.core.tasks.purge_activity_log',
         'schedule': crontab(hour=4, minute=30),
     },
+    'purge_telegram_updates': {
+        'task': 'apps.core.tasks.purge_telegram_updates',
+        'schedule': crontab(hour=4, minute=40),
+    },
     'purge_spend_ledger': {
         'task': 'apps.core.tasks.purge_spend_ledger',
         'schedule': crontab(hour=4, minute=0, day_of_week=0),

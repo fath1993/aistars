@@ -532,3 +532,14 @@ class ListenTests(StudioTestCase):
         answer = Message.objects.create(conversation=other, role="assistant", text="secret")
         self.tap(f"out:say:{answer.pk}")
         self.assertFalse(Job.objects.filter(kind="speech").exists())
+
+
+class DuplicateDeliveryTests(StudioTestCase):
+    def test_a_message_telegram_sends_twice_is_answered_and_charged_once(self):
+        from apps.core.tests.helpers import message_update, post_update
+
+        update = message_update("Hello twice")
+        post_update(update)
+        post_update(update)
+        self.assertEqual(Job.objects.count(), 1)
+        self.assertEqual(self.balance(), 499)

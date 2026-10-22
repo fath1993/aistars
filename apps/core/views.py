@@ -12,7 +12,7 @@ from apps.billing import bot as billing_bot
 from apps.studio import archive
 from apps.studio import bot as studio_bot
 
-from . import activity, languages, menus, registration, runtime
+from . import activity, languages, menus, registration, runtime, updates
 from .models import Account, LogCategory
 from .services import telegram, ui
 
@@ -34,6 +34,7 @@ def telegram_webhook(request):
     expected = runtime.get("TELEGRAM_WEBHOOK_SECRET")
     if not expected or not hmac.compare_digest(secret, str(expected)):
         logger.warning("webhook rejected: bad secret token")
+        updates.rejected(request.body)
         # Recorded, so "Telegram delivers and we reject" is distinguishable
         # from "Telegram does not deliver". Throttled: a misconfigured webhook
         # retries hard.
@@ -53,6 +54,13 @@ def telegram_webhook(request):
         return OK
 
     _mark_delivery()
+    if not isinstance(update, dict):
+        return OK
+    # Kept as it came (Telegram updates in the admin); one sent again because
+    # the answer was slow is not handled twice.
+    row = updates.receive(update)
+    if row is None:
+        return OK
 
     try:
         if "callback_query" in update:
@@ -66,8 +74,11 @@ def telegram_webhook(request):
     except Exception as exc:
         # Never 500 back to Telegram; that buys an infinite retry loop.
         logger.exception("webhook handler failed for update %s", update.get("update_id"))
-        activity.error(LogCategory.WEBHOOK, "handler_error", str(exc),
+        activity.error(LogCategory.WEBHOOK, "handler_error", updates.error_text(exc),
                        detail={"update_id": update.get("update_id")})
+        updates.failed(row, exc)
+    else:
+        updates.handled(row)
     return OK
 
 

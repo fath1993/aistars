@@ -11,6 +11,13 @@ def purge_activity_log():
 
 
 @shared_task
+def purge_telegram_updates():
+    from . import updates
+
+    return updates.purge()
+
+
+@shared_task
 def purge_spend_ledger():
     return budget.purge_old_ledger(settings.SPEND_LEDGER_RETENTION_DAYS)
 

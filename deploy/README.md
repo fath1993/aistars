@@ -211,6 +211,13 @@ visitor ⇄ HTTPS ⇄ Cloudflare ⇄ HTTP ⇄ edge (server-edge, Traefik, :80) �
   from the archive channel. `/privacy` (also Profile → 🔒 Privacy) tells
   users what is kept, that a deleted chat stays with you, and that you can
   read chats.
+- **Telegram updates** (Core → Telegram updates): every update Telegram
+  sends, as it came: type, who (linked to the account), a preview, Handled or
+  Failed (with the error), how many times Telegram sent it (it is handled
+  once), and the raw data. Deliveries with a wrong secret are listed as
+  Rejected, at most one a minute. An account's page links to everything that
+  user sent. Kept for **Telegram updates kept for (days)** (90; 0 forever),
+  deleted every night at 04:40 UTC.
 - **Commands:** `/new`, `/agents`, `/chats`, `/usage`, `/images`, `/voice`,
   `/privacy`, `/menu`, `/help` (typed; there is no ☰ command list).
 - **🎨 Images:** Create an image from a description, or Edit a photo (or

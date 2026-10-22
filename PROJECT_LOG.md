@@ -50,6 +50,34 @@ touches one, update it in the same change.
 
 ## Changelog
 
+### 2026-10-22 — v0.5.0 — Keep every Telegram update, and handle each once
+
+The owner wants the warehouse bot's Telegram updates section here too: there
+every update is stored as received and shown read-only in the admin. AIstars
+handled updates and kept nothing, so whether Telegram ever sent the "made
+admin of a channel" notice for the archive could not be seen. Asked how long
+to keep them, the owner left it to me: 90 days, adjustable (the chats,
+payments and requests they made stay regardless).
+- `TelegramUpdate` (Core → Telegram updates, `apps/core/updates.py`): the
+  update as it came, its type, the user or chat it came from, a preview (the
+  text, the button, "[file: cv.pdf] caption", "shared a phone number", "paid
+  250 XTR", "channel “Archive”: left → administrator"), the outcome
+  (Handled, Failed with the error, Rejected), how many times Telegram sent
+  it, and when. Read-only; the sender links to their account, and each
+  account links to everything it sent. One query for the list's accounts.
+- **Handled once.** Telegram sends an update again when the answer is slow;
+  the webhook handled it again (a second answer, a second charge). The
+  update_id is unique now: a repeat only counts a delivery.
+- **Failures** keep their error with the bot token removed (a Bot API URL
+  carries it); the activity log line is cleaned the same way.
+- **Rejected** deliveries (wrong secret) are listed too, at most one a
+  minute and at most 20 KB of body, without an update_id so a forged one
+  never blocks the real update.
+- **Telegram updates kept for (days)**, 90 (0: forever), deleted every night
+  at 04:40 UTC (`purge_telegram_updates`).
+- Tests for all of it, and for a chat message sent twice being answered and
+  charged once.
+
 ### 2026-10-21 — v0.4.2 — Keep the project nginx pointed at the app
 
 After the server's edge took over port 80, aistars.myshortclip.com answered

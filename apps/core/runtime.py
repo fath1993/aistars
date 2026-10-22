@@ -126,6 +126,11 @@ REGISTRY = (
     # ---- Housekeeping ----------------------------------------------------
     Spec("ACTIVITY_LOG_RETENTION_DAYS", "general", "Activity log retention (days)",
          kind="int", default=30),
+    Spec("TELEGRAM_UPDATES_KEEP_DAYS", "general", "Telegram updates kept for (days)",
+         kind="int", default=90,
+         help="Every update Telegram sends is kept as it came (Telegram updates), then "
+              "deleted after this many days. The chats, payments and requests they made stay. "
+              "0: kept forever."),
 )
 
 BY_KEY = {spec.key: spec for spec in REGISTRY}
@@ -163,6 +168,7 @@ def normalise(key: str, value: str) -> str:
 # Whole-number settings and the values they accept.
 RANGES = {
     "CHAT_MEMORY_TOKENS": (1000, 200_000),
+    "TELEGRAM_UPDATES_KEEP_DAYS": (0, 3650),
     "CHAT_FILE_MESSAGES": (1, 50),
     "CHAT_MAX_MESSAGE_CHARS": (100, 100_000),
     "JOBS_PER_USER": (1, 10),

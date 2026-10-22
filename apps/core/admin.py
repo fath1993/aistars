@@ -16,6 +16,7 @@ from .models import (
     RuntimeSetting,
     SourceText,
     SpendLedger,
+    TelegramUpdate,
     Translation,
     TranslationStatus,
 )
@@ -60,7 +61,17 @@ class AccountAdmin(admin.ModelAdmin):
     search_fields = ("telegram_user_id", "username", "display_name", "phone")
     readonly_fields = ("telegram_user_id", "username", "display_name",
                        "language_code", "phone", "country", "registered_at",
-                       "last_seen_at", "ui_message_id", "created_at", "updated_at")
+                       "last_seen_at", "ui_message_id", "created_at", "updated_at",
+                       "telegram_updates")
+
+    @admin.display(description="Telegram updates")
+    def telegram_updates(self, obj):
+        """What this user sent the bot, as it came."""
+        from django.urls import reverse
+        from django.utils.html import format_html
+
+        url = reverse("admin:core_telegramupdate_changelist") + f"?user_id={obj.telegram_user_id}"
+        return format_html('<a href="{}">Everything this user sent</a>', url)
 
     def get_queryset(self, request):
         from django.db.models import OuterRef, Subquery
@@ -520,6 +531,59 @@ class ActivityLogAdmin(admin.ModelAdmin):
     @admin.display(description="message")
     def short_message(self, obj):
         return (obj.message or "")[:110]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(TelegramUpdate)
+class TelegramUpdateAdmin(admin.ModelAdmin):
+    """
+    Every update Telegram sent, as it came: what a user really sent, whether
+    Telegram sent anything at all (an update turned away for a wrong secret is
+    listed as Rejected), and why one failed.
+    """
+
+    list_display = ("received_at", "update_id", "kind", "sender", "summary", "outcome",
+                    "deliveries")
+    list_filter = ("outcome", "kind", "received_at")
+    search_fields = ("=update_id", "=user_id", "summary")
+    # Large and growing: no full count, no date drill-down (see the activity log).
+    show_full_result_count = False
+    fields = ("update_id", "kind", "sender", "summary", "outcome", "deliveries",
+              "received_at", "handled_at", "error", "pretty_payload")
+    readonly_fields = fields
+
+    def get_queryset(self, request):
+        from django.db.models import OuterRef, Subquery
+
+        account = Account.objects.filter(telegram_user_id=OuterRef("user_id")).values("pk")[:1]
+        return super().get_queryset(request).annotate(account_pk=Subquery(account))
+
+    @admin.display(description="from")
+    def sender(self, obj):
+        """The account, when the update came from a user the bot knows."""
+        from django.urls import reverse
+        from django.utils.html import format_html
+
+        if obj.user_id is None:
+            return "—"
+        if not obj.account_pk:
+            return obj.user_id
+        url = reverse("admin:core_account_change", args=[obj.account_pk])
+        return format_html('<a href="{}">{}</a>', url, obj.user_id)
+
+    @admin.display(description="payload")
+    def pretty_payload(self, obj):
+        import json
+
+        from django.utils.html import format_html
+
+        return format_html("<pre>{}</pre>", json.dumps(obj.payload, indent=2,
+                                                        ensure_ascii=False))
 
     def has_add_permission(self, request):
         return False
