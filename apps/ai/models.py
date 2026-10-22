@@ -4,14 +4,10 @@ from django.db import models
 
 
 class ProviderKind(models.TextChoices):
+    """One per adapter (adapters/): what it does is the adapter's to say."""
+
     OPENAI = "openai", "OpenAI"
     ANTHROPIC = "anthropic", "Anthropic"
-
-
-DEFAULT_BASE_URL = {
-    ProviderKind.OPENAI: "https://api.openai.com",
-    ProviderKind.ANTHROPIC: "https://api.anthropic.com",
-}
 
 
 class Provider(models.Model):
@@ -37,11 +33,30 @@ class Provider(models.Model):
 
     @property
     def endpoint(self) -> str:
-        return (self.base_url or DEFAULT_BASE_URL[self.kind]).rstrip("/")
+        from .adapters import of
+
+        return (self.base_url or of(self).default_url).rstrip("/")
 
     @property
     def usable(self) -> bool:
         return self.enabled and bool(self.api_key.strip())
+
+    def offers(self, demo=False) -> list:
+        """
+        The functions (Use values) users who choose it are offered: the ones
+        its adapter carries out and it has a model users can have for.
+        """
+        found = {model.use for model in AIModel.ready_models(demo)
+                 if model.provider_id == self.pk}
+        return [use for use in Use.values if use in found]
+
+    @classmethod
+    def for_users(cls, demo=False) -> list:
+        """The providers users can choose: those that offer anything, in order."""
+        found = {}
+        for model in AIModel.ready_models(demo):
+            found.setdefault(model.provider_id, model.provider)
+        return sorted(found.values(), key=lambda provider: provider.kind)
 
     def masked_key(self) -> str:
         key = self.api_key.strip()
@@ -85,8 +100,8 @@ class AIModel(models.Model):
         default=False, help_text="Offered to users in the bot. Set its prices first.")
     is_default = models.BooleanField(
         "default for users", default=False,
-        help_text="What users get unless they choose another: new chats, images, voice. "
-                  "One per use.")
+        help_text="What users of its provider get unless they choose another: new chats, "
+                  "images, voice. One per use and provider.")
     tagline = models.CharField(
         max_length=80, blank=True,
         help_text="One short line users see under the name, e.g. “Fast and cheap, for "
@@ -197,7 +212,8 @@ class AIModel(models.Model):
             if getattr(self, flag):
                 AIModel.objects.exclude(pk=self.pk).filter(**{flag: True}).update(**{flag: False})
         if self.is_default:
-            AIModel.objects.exclude(pk=self.pk).filter(use=self.use, is_default=True).update(
+            AIModel.objects.exclude(pk=self.pk).filter(
+                use=self.use, provider_id=self.provider_id, is_default=True).update(
                 is_default=False)
 
     @classmethod
@@ -210,16 +226,29 @@ class AIModel(models.Model):
         return cls.objects.select_related("provider").filter(default_for_safety=True).first()
 
     @classmethod
-    def offered_for(cls, use, demo=False) -> list:
-        """What users can choose for `use` right now, best first."""
-        rows = cls.objects.select_related("provider").filter(use=use, offered=True,
-                                                             enabled=True)
-        return [model for model in rows if model.ready_for(demo)]
+    def ready_models(cls, demo=False) -> list:
+        """
+        Every model users can have right now, best first: offered, priced, on,
+        its provider on (with a key, outside Demo mode), and its use one its
+        provider's adapter carries out.
+        """
+        from .adapters import ADAPTERS
+
+        rows = cls.objects.select_related("provider").filter(
+            offered=True, enabled=True, provider__enabled=True)
+        return [model for model in rows if model.ready_for(demo)
+                and model.use in getattr(ADAPTERS.get(model.provider.kind), "functions", ())]
 
     @classmethod
-    def default_for(cls, use, demo=False):
-        """The default for `use` if users can have it, else the first that is ready."""
-        offered = cls.offered_for(use, demo)
+    def offered_for(cls, use, demo=False, provider=None) -> list:
+        """What users can choose for `use` right now (of `provider`), best first."""
+        return [model for model in cls.ready_models(demo) if model.use == use
+                and (provider is None or model.provider_id == provider.pk)]
+
+    @classmethod
+    def default_for(cls, use, demo=False, provider=None):
+        """The default for `use` (of `provider`), else the first that is ready."""
+        offered = cls.offered_for(use, demo, provider)
         return next((model for model in offered if model.is_default), None) or (
             offered[0] if offered else None)
 

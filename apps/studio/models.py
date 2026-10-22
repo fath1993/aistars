@@ -61,7 +61,8 @@ class Assistant(models.Model):
     model = models.ForeignKey(
         "ai.AIModel", null=True, blank=True, on_delete=models.SET_NULL,
         limit_choices_to={"use": "chat"},
-        help_text="Empty: the model the user chose for their chats.")
+        help_text="Empty: the model the user chose for their chats. Used only for users of "
+                  "its provider; the others get their own provider's model.")
     featured = models.BooleanField(default=False,
                                    help_text="Offered first when a user starts a new chat.")
     active = models.BooleanField(default=True)
@@ -80,6 +81,10 @@ class Profile(models.Model):
 
     account = models.OneToOneField("core.Account", on_delete=models.CASCADE,
                                    related_name="studio")
+    provider = models.ForeignKey(
+        "ai.Provider", null=True, blank=True, on_delete=models.SET_NULL, related_name="+",
+        help_text="🧠 AI provider: the AI company the user chose; they are offered only what "
+                  "it does. Empty: Runtime settings → Default AI provider.")
     chat_model = models.ForeignKey("ai.AIModel", null=True, blank=True,
                                    on_delete=models.SET_NULL, related_name="+")
     image_model = models.ForeignKey("ai.AIModel", null=True, blank=True,

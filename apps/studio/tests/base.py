@@ -69,7 +69,8 @@ class Response:
 
 class FakeOpenAI:
     """
-    Answers every OpenAI call the bot makes, and records them. Set `answer`
+    Answers every OpenAI call the bot makes (and Anthropic's chat, for users
+    who chose it), and records them. Set `answer`
     (the chat's words), `usage`, `flag` (Moderation categories), `judge`,
     `image_usage`, `transcript`, or `fail` (a path that answers an error).
     """
@@ -129,6 +130,14 @@ class FakeOpenAI:
             return Response({"text": self.transcript})
         if path == "audio/speech":
             return Response(content=b"OggS-speech")
+        if path == "messages" and kwargs["json"].get("stream"):
+            # Anthropic's chat, for users who chose it.
+            words = [self.answer[i:i + 7] for i in range(0, len(self.answer), 7)]
+            return Response(events=[
+                {"type": "message_start", "message": {"usage": {"input_tokens": 1000}}},
+                *[{"type": "content_block_delta", "delta": {"text": piece}} for piece in words],
+                {"type": "message_delta", "usage": {"output_tokens": 200},
+                 "delta": {"stop_reason": "end_turn"}}])
         raise AssertionError(f"unexpected call to {url}")
 
 
@@ -146,10 +155,9 @@ class StudioTestCase(TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.openai = FakeOpenAI()
-        for target in ("apps.ai.clients.requests.post", "apps.safety.checks.requests.post"):
-            patcher = mock.patch(target, side_effect=self.openai)
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        patcher = mock.patch("requests.post", side_effect=self.openai)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         patcher = mock.patch("apps.core.services.telegram.download_file",
                              side_effect=self.download)
         patcher.start()

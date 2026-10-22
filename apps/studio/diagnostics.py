@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from apps.ai.models import AIModel, Use
+from apps.ai.models import AIModel, Provider, Use
 from apps.core import runtime
 from apps.core.diagnostics import OK, WARN
 from apps.core.models import Account, ControlPanel
@@ -27,16 +27,26 @@ def check(report, section):
         report.add(WARN, "Using the tools", f"{label}, but no account is a tester: nobody can "
                    "use them", "Accounts → select yours → action Tester.", section)
 
-    for use, name in Use.choices:
-        offered = AIModel.offered_for(use, panel.demo_mode)
-        if not offered:
-            report.add(WARN, name, "no model users can have: this tool does not show",
-                       FIX, section)
-            continue
-        default = AIModel.default_for(use, panel.demo_mode)
-        report.add(OK, name, ", ".join(
-            f"{model}{' (default)' if model == default else ''}" for model in offered), "",
-            section)
+    names = dict(Use.choices)
+    providers = Provider.for_users(panel.demo_mode)
+    if not providers:
+        report.add(WARN, "AI providers", "none offers users anything: the tools do not show",
+                   FIX, section)
+    for provider in providers:
+        parts = []
+        for use in provider.offers(panel.demo_mode):
+            default = AIModel.default_for(use, panel.demo_mode, provider)
+            parts.append(f"{names[use]}: " + ", ".join(
+                f"{model}{' (default)' if model == default else ''}"
+                for model in AIModel.offered_for(use, panel.demo_mode, provider)))
+        report.add(OK, f"Provider {provider}", " · ".join(parts), "", section)
+    default = str(runtime.get("DEFAULT_PROVIDER") or "")
+    if providers and default not in {provider.kind for provider in providers}:
+        report.add(WARN, "Default AI provider", f"{default or 'not set'} offers users nothing: "
+                   f"they get {providers[0]}", "Runtime settings → Default AI provider, or "
+                   "give that provider a key and offered models.", section)
+    elif providers:
+        report.add(OK, "Default AI provider", default, "", section)
     unlisted = AIModel.objects.filter(offered=True, listed=False).count()
     if unlisted:
         report.add(WARN, "Models not at the provider",

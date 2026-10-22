@@ -197,7 +197,7 @@ def _route_message(account, message):
                         menus.home_keyboard(account))
         return
     if command == "help":
-        ui.fresh_screen(account, chat_id, menus.help_text(), menus.back_keyboard())
+        ui.fresh_screen(account, chat_id, menus.help_text(account), menus.back_keyboard())
         return
     if command == "privacy":
         ui.fresh_screen(account, chat_id, studio_bot.privacy_text(), menus.back_keyboard())
@@ -346,7 +346,7 @@ def _route_callback(account, callback_query):
 
 def _menu(account, chat_id, section):
     if section == "help":
-        ui.screen(account, chat_id, menus.help_text(), menus.back_keyboard())
+        ui.screen(account, chat_id, menus.help_text(account), menus.back_keyboard())
     elif section == "privacy":
         ui.screen(account, chat_id, studio_bot.privacy_text(),
                   menus.back_keyboard("menu:profile"))

@@ -102,6 +102,10 @@ REGISTRY = (
               "channel, post anything there, and pick it. Every photo and voice "
               "note sent in, and every image and voice note made, is copied there. "
               "Empty: nothing is archived."),
+    Spec("DEFAULT_PROVIDER", "studio", "Default AI provider", default="openai",
+         help="What users get until they choose one (Profile → AI provider), and when theirs "
+              "offers nothing any more: openai or anthropic. Users are offered only what "
+              "their provider does (Anthropic: chat, no images or voice)."),
     Spec("CHAT_MEMORY_TOKENS", "studio", "Chat memory, word for word (tokens)", kind="int",
          default=8000,
          help="A chat's newest messages go with each new one word for word, up to about this "
@@ -221,6 +225,11 @@ def validate(key: str, value: str) -> str:
         low, high = RANGES[key]
         if not value.isdigit() or not low <= int(value) <= high:
             return f"A whole number from {low} to {high}."
+    if key == "DEFAULT_PROVIDER":
+        from apps.ai.models import ProviderKind
+
+        if value not in ProviderKind.values:
+            return "One of: " + ", ".join(ProviderKind.values) + "."
     if key == "CREDIT_ICON" and not 1 <= len(value.strip()) <= 8:
         return "One emoji, e.g. 💎."
     if key in ("FINANCE_EUR_RATE", "PROVIDER_LOW_BALANCE_USD"):

@@ -39,7 +39,7 @@ class ClientTests(TestCase):
         self.luna = AIModel.objects.get(model_id="gpt-6-luna")
 
     def ask(self, model, response):
-        with mock.patch("apps.ai.clients.requests.post", return_value=response) as post:
+        with mock.patch("requests.post", return_value=response) as post:
             reply = clients.ask(model, "be brief", "Hello", purpose="test")
         return reply, post.call_args
 
@@ -77,7 +77,7 @@ class ClientTests(TestCase):
     def test_a_network_error_is_explained(self):
         import requests
 
-        with mock.patch("apps.ai.clients.requests.post",
+        with mock.patch("requests.post",
                         side_effect=requests.ConnectionError("down")):
             with self.assertRaisesMessage(clients.AIError, "could not reach the provider"):
                 clients.ask(self.haiku, "s", "p", purpose="test")
@@ -85,14 +85,14 @@ class ClientTests(TestCase):
     def test_no_key_means_no_call(self):
         Provider.objects.update(api_key="")
         self.haiku.refresh_from_db()
-        with mock.patch("apps.ai.clients.requests.post") as post:
+        with mock.patch("requests.post") as post:
             with self.assertRaisesMessage(clients.AIError, "AI → Providers"):
                 clients.ask(self.haiku, "s", "p", purpose="test")
         post.assert_not_called()
 
     def test_the_kill_switch_means_no_call(self):
         ControlPanel.objects.update_or_create(singleton=1, defaults={"paused": True})
-        with mock.patch("apps.ai.clients.requests.post") as post:
+        with mock.patch("requests.post") as post:
             with self.assertRaises(budget.PlatformPaused):
                 clients.ask(self.haiku, "s", "p", purpose="test")
         post.assert_not_called()
@@ -186,7 +186,7 @@ class AdminTests(TestCase):
 
     def test_the_test_action_reports(self):
         Provider.objects.update(api_key="sk-test")
-        with mock.patch("apps.ai.clients.requests.post",
+        with mock.patch("requests.post",
                         return_value=FakeResponse(ANTHROPIC_OK)):
             response = self.client.post("/admin/ai/provider/", {
                 "action": "test",
@@ -202,7 +202,7 @@ class ImageTests(TestCase):
 
     def sent(self, model_id, body):
         model = AIModel.objects.get(model_id=model_id)
-        with mock.patch("apps.ai.clients.requests.post",
+        with mock.patch("requests.post",
                         return_value=FakeResponse(body)) as post:
             clients.ask(model, "s", "Is this fine?", purpose="test",
                         images=[(b"\xff\xd8jpeg", "image/jpeg")])
@@ -274,7 +274,7 @@ class ChatStreamTests(TestCase):
 
     def chat(self, model, stream, messages=None):
         seen = []
-        with mock.patch("apps.ai.clients.requests.post", return_value=stream) as post:
+        with mock.patch("requests.post", return_value=stream) as post:
             reply = clients.chat(model, "be brief", messages or [
                 {"role": "user", "text": "Hi", "images": []},
                 {"role": "assistant", "text": "Hello!", "images": []},
@@ -364,7 +364,7 @@ class ChatStreamTests(TestCase):
 
     def test_the_spend_guard_sees_the_most_it_can_cost(self):
         ControlPanel.objects.update_or_create(singleton=1, defaults={"hourly_budget": "0.01"})
-        with mock.patch("apps.ai.clients.requests.post") as post:
+        with mock.patch("requests.post") as post:
             with self.assertRaises(budget.CapExceeded):
                 clients.chat(self.luna, "s", [{"role": "user", "text": "x", "images": []}],
                              purpose="chat", estimate_micros=20_000)
@@ -393,7 +393,7 @@ class OpenAIMediaTests(TestCase):
         "input_tokens_details": {"text_tokens": 100, "image_tokens": 1000}}}
 
     def test_an_image_is_made_and_priced_from_its_usage(self):
-        with mock.patch("apps.ai.clients.requests.post",
+        with mock.patch("requests.post",
                         return_value=MediaResponse(self.IMAGE)) as post:
             picture = clients.image(self.flare, "a red fox", "1024x1024", "high")
         self.assertEqual(picture.data, b"image")
@@ -405,7 +405,7 @@ class OpenAIMediaTests(TestCase):
             "quality": "high", "n": 1})
 
     def test_a_photo_is_changed_through_edits(self):
-        with mock.patch("apps.ai.clients.requests.post",
+        with mock.patch("requests.post",
                         return_value=MediaResponse(self.IMAGE)) as post:
             clients.image(self.flare, "make it night", "auto", "medium",
                           photos=[(b"\xff\xd8jpeg", "image/jpeg")])
@@ -416,7 +416,7 @@ class OpenAIMediaTests(TestCase):
         self.assertEqual(call.kwargs["data"]["size"], "auto")
 
     def test_without_usage_the_estimate_is_charged(self):
-        with mock.patch("apps.ai.clients.requests.post",
+        with mock.patch("requests.post",
                         return_value=MediaResponse({"data": [{"b64_json": "aW1hZ2U="}]})):
             picture = clients.image(self.flare, "a fox", "1024x1024", "low",
                                     estimate_micros=5000)
@@ -426,12 +426,12 @@ class OpenAIMediaTests(TestCase):
         refused = MediaResponse({"error": {"message": "Your request was rejected by the "
                                            "safety system.", "code": "moderation_blocked"}},
                                 status=400)
-        with mock.patch("apps.ai.clients.requests.post", return_value=refused):
+        with mock.patch("requests.post", return_value=refused):
             with self.assertRaises(clients.ProviderRefused):
                 clients.image(self.flare, "x", "1024x1024", "low")
 
     def test_a_voice_note_is_transcribed_and_priced_by_its_length(self):
-        with mock.patch("apps.ai.clients.requests.post",
+        with mock.patch("requests.post",
                         return_value=MediaResponse({"text": " Salut! "})) as post:
             text, cost = clients.transcribe(self.stt, b"OggS", "voice.ogg", 40)
         self.assertEqual((text, cost), ("Salut!", 3000))
@@ -441,7 +441,7 @@ class OpenAIMediaTests(TestCase):
         self.assertEqual(budget.spent_today()["cost"], 3000)
 
     def test_a_text_is_read_aloud_as_a_voice_note(self):
-        with mock.patch("apps.ai.clients.requests.post",
+        with mock.patch("requests.post",
                         return_value=MediaResponse(content=b"OggS-audio")) as post:
             audio, cost = clients.speak(self.tts, "Hello there", "marin")
         self.assertEqual((audio, cost), (b"OggS-audio", 220))
@@ -463,7 +463,7 @@ class SyncTests(TestCase):
     def sync(self, ids):
         from apps.ai import sync
 
-        with mock.patch("apps.ai.clients.requests.get", return_value=MediaResponse(
+        with mock.patch("requests.get", return_value=MediaResponse(
                 {"data": [{"id": model_id} for model_id in ids]})) as get:
             result = sync.sync(self.openai)
         self.call = get.call_args
@@ -488,7 +488,7 @@ class SyncTests(TestCase):
     def test_the_admin_action_reports(self):
         user = get_user_model().objects.create_superuser("admin", "a@example.com", "pw")
         self.client.force_login(user)
-        with mock.patch("apps.ai.clients.requests.get", return_value=MediaResponse(
+        with mock.patch("requests.get", return_value=MediaResponse(
                 {"data": [{"id": "gpt-6-luna"}, {"id": "gpt-7-nova"}]})):
             response = self.client.post("/admin/ai/provider/", {
                 "action": "sync_models", "_selected_action": [self.openai.pk]}, follow=True)
@@ -506,7 +506,7 @@ class CacheTests(TestCase):
         self.haiku = AIModel.objects.get(model_id="claude-haiku-5-5")
 
     def chat(self, model, stream, cache_key=""):
-        with mock.patch("apps.ai.clients.requests.post", return_value=stream) as post:
+        with mock.patch("requests.post", return_value=stream) as post:
             reply = clients.chat(model, "be brief", [{"role": "user", "text": "Hi", "images": []}],
                                  purpose="chat", on_text=lambda text: None, cache_key=cache_key)
         return reply, post.call_args.kwargs["json"]

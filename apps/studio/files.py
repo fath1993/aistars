@@ -109,9 +109,19 @@ def media_type(item) -> str:
     return item.get("mime") or "application/octet-stream"
 
 
+def readable(model) -> list:
+    """What `model` reads: photos, pdf, office, text (its provider's adapter says which files)."""
+    from apps.ai import adapters
+
+    reads = adapters.of(model.provider).reads
+    kinds = ["photos"] if model.sees_images else []
+    return kinds + [kind for kind in ("pdf", "office", "text") if kind in reads
+                    and (kind != "pdf" or model.sees_images)]
+
+
 def problem(item, model) -> tuple:
     """(what, name): why `model` cannot read `item`; ("", "") when it can."""
-    from apps.ai.models import ProviderKind
+    from apps.ai import adapters
 
     name = item.get("name") or ""
     if item["kind"] == "other":
@@ -123,9 +133,9 @@ def problem(item, model) -> tuple:
     kind = sort(item)
     if not kind:
         return "unsupported", name
+    if kind not in adapters.of(model.provider).reads:
+        return "provider_cannot_read", name
     if kind == "pdf" and not model.sees_images:
-        return "cannot_read", name
-    if kind == "office" and model.provider.kind != ProviderKind.OPENAI:
         return "cannot_read", name
     return "", ""
 

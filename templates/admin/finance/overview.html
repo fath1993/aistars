@@ -109,12 +109,14 @@
     <tr><td>Before calls were recorded one by one (totals only)</td><td></td>
         <td class="num">${{ data.ai.earlier|floatformat:4 }}</td></tr>
   {% endif %}
-  {% if openai_billed is not None %}
-    <tr><td><em>OpenAI's own figure for this period (Costs API)</em></td><td></td>
-        <td class="num"><em>${{ openai_billed|floatformat:4 }}</em></td></tr>
-  {% elif openai_billed_error %}
-    <tr><td colspan="3" class="help">OpenAI's own figure could not be read: {{ openai_billed_error }}</td></tr>
-  {% endif %}
+  {% for row in billed %}
+    {% if row.usd is not None %}
+      <tr><td><em>{{ row.name }}'s own figure for this period (read with its Admin key)</em></td><td></td>
+          <td class="num"><em>${{ row.usd|floatformat:4 }}</em></td></tr>
+    {% else %}
+      <tr><td colspan="3" class="help">{{ row.name }}'s own figure could not be read: {{ row.error }}</td></tr>
+    {% endif %}
+  {% endfor %}
 </table>
 
 <table>

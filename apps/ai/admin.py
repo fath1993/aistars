@@ -1,8 +1,8 @@
 from django import forms
 from django.contrib import admin, messages
 
-from . import clients, sync
-from .models import AICall, AIModel, Provider
+from . import adapters, clients, sync
+from .models import AICall, AIModel, Provider, Use
 
 
 class ProviderForm(forms.ModelForm):
@@ -40,7 +40,8 @@ class ModelInline(admin.TabularInline):
 @admin.register(Provider)
 class ProviderAdmin(admin.ModelAdmin):
     form = ProviderForm
-    list_display = ("__str__", "key", "enabled", "models_count", "synced_at", "updated_at")
+    list_display = ("__str__", "key", "enabled", "does", "offers", "models_count",
+                    "synced_at", "updated_at")
     readonly_fields = ("synced_at",)
     inlines = (ModelInline,)
     actions = ("test", "sync_models")
@@ -48,6 +49,20 @@ class ProviderAdmin(admin.ModelAdmin):
     @admin.display(description="API key")
     def key(self, obj):
         return obj.masked_key()
+
+    @admin.display(description="can do")
+    def does(self, obj):
+        names = dict(Use.choices)
+        functions = getattr(adapters.ADAPTERS.get(obj.kind), "functions", ())
+        return ", ".join(names[use] for use in Use.values if use in functions) or "—"
+
+    @admin.display(description="offers users now")
+    def offers(self, obj):
+        from apps.core.models import ControlPanel
+
+        names = dict(Use.choices)
+        return ", ".join(names[use] for use in obj.offers(ControlPanel.get().demo_mode)) \
+            or "nothing"
 
     @admin.display(description="models (offered)")
     def models_count(self, obj):

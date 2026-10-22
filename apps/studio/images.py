@@ -13,7 +13,7 @@ what OpenAI reports it really used.
 """
 
 from apps.ai import clients
-from apps.ai.models import AIModel, Use
+from apps.ai.models import Use
 from apps.billing import ledger
 from apps.core import menus
 from apps.core.services import telegram, ui
@@ -21,7 +21,7 @@ from apps.safety import checks
 from apps.safety.models import Result, Screening
 from apps.safety.texts import category_text
 
-from . import archive, demo, jobs, state, texts
+from . import archive, demo, jobs, offer, state, texts
 from .models import Job, Kind
 
 # Image tokens made for each size and quality, as OpenAI published them for
@@ -38,17 +38,16 @@ PHOTO_TOKENS = 3000
 DEFAULTS = {"size": "1024x1024", "quality": "medium"}
 
 
-def model_for(account=None, edit=False):
+def model_for(account, edit=False):
     """
-    The image model: the user's choice, else the default; for an edit, one
-    that can change photos.
+    The image model of the user's provider: their choice, else the default;
+    for an edit, one that can change photos. None when it has none.
     """
     from .chat import profile
 
-    is_demo = jobs.demo()
-    offered = AIModel.offered_for(Use.IMAGE, is_demo)
-    chosen = profile(account).image_model_id if account is not None else None
-    default = AIModel.default_for(Use.IMAGE, is_demo)
+    offered = offer.models(account, Use.IMAGE)
+    chosen = profile(account).image_model_id
+    default = offer.model(account, Use.IMAGE)
     ordered = ([model for model in offered if model.pk == chosen]
                + ([default] if default is not None else []) + offered)
     return next((model for model in ordered if model.sees_images or not edit), None)
@@ -70,14 +69,14 @@ def estimate(model, prompt, size, quality, photos) -> int:
 def show(account, chat_id, fresh=False):
     model = model_for(account)
     editor = model_for(account, edit=True)
-    several = len(AIModel.offered_for(Use.IMAGE, jobs.demo())) > 1
+    several = len(offer.models(account, Use.IMAGE)) > 1
     (ui.fresh_screen if fresh else ui.screen)(
         account, chat_id, texts.images_text(model),
         texts.images_keyboard(model, editor is not None, several))
 
 
 def show_models(account, chat_id):
-    models = AIModel.offered_for(Use.IMAGE, jobs.demo())
+    models = offer.models(account, Use.IMAGE)
     ui.screen(account, chat_id, texts.image_models_text(models),
               texts.models_keyboard(models, model_for(account), back="img:",
                                     verb="img:model"))
@@ -87,7 +86,7 @@ def choose_model(account, chat_id, value):
     from .chat import profile
     from .models import Profile
 
-    models = {str(model.pk): model for model in AIModel.offered_for(Use.IMAGE, jobs.demo())}
+    models = {str(model.pk): model for model in offer.models(account, Use.IMAGE)}
     if value in models:
         Profile.objects.filter(pk=profile(account).pk).update(image_model=models[value])
     show(account, chat_id)
@@ -223,7 +222,7 @@ def again(account, chat_id, job):
 
 def edit_result(account, chat_id, job):
     """Change the image just made: it becomes the photo to edit."""
-    if not job.result_file_id:
+    if not job.result_file_id or model_for(account, edit=True) is None:
         return show(account, chat_id, fresh=True)
     state.wait(account, "edit_prompt", photos=[job.result_file_id])
     ui.fresh_screen(account, chat_id, texts.ask_change_text(), texts.cancel_keyboard("img:"))
@@ -279,7 +278,8 @@ def _deliver(job, data, cost):
     original = archive.store_output(job, "document", data, f"image-{job.pk}.png", "image/png",
                                     role="original")
     original_id = telegram.file_id_of(original, "document")
-    markup = texts.image_keyboard(job, bool(original_id), texts.low_balance(balance))
+    markup = texts.image_keyboard(job, bool(original_id), texts.low_balance(balance),
+                                  can_edit=model_for(job.account, edit=True) is not None)
     sent = None
     if stored:
         file_id = telegram.file_id_of(stored, "photo")

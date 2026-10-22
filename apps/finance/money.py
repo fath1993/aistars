@@ -217,18 +217,26 @@ def held_credits() -> dict:
             "cost_at_most": stars_usd(credits) / (1 + margin / 100)}
 
 
-def openai_billed(start, end):
-    """(micro-USD OpenAI itself reports, or None; the reason when it could not be read)."""
-    from apps.ai import clients
+def providers_billed(start, end) -> list:
+    """
+    [{"name", "usd" or None, "error"}]: what each provider itself says was
+    spent in the period, for those whose adapter reports it and that have an
+    Admin key.
+    """
+    from apps.ai import adapters, clients
     from apps.ai.models import Provider
 
-    provider = Provider.objects.filter(kind="openai").first()
-    if provider is None or not provider.admin_key.strip():
-        return None, ""
-    try:
-        return clients.billed_costs(provider, start, min(end, timezone.now())), ""
-    except clients.AIError as exc:
-        return None, str(exc)
+    found = []
+    for provider in Provider.objects.all():
+        adapter = adapters.ADAPTERS.get(provider.kind)
+        if adapter is None or not adapter.reports_costs or not provider.admin_key.strip():
+            continue
+        try:
+            usd = micros_usd(clients.billed_costs(provider, start, min(end, timezone.now())))
+            found.append({"name": str(provider), "usd": usd, "error": ""})
+        except clients.AIError as exc:
+            found.append({"name": str(provider), "usd": None, "error": str(exc)})
+    return found
 
 
 # --------------------------------------------------------------------------

@@ -1,15 +1,19 @@
 # AIstars — Project Log
 
 A Telegram bot where people chat with AI, create and edit images, turn voice
-into text and text into speech, and pay with Telegram Stars. OpenAI is the
-default provider; Anthropic can be added. Built from MyShortClip's code: the
-same registration, languages, credits, safety checks, admin and deployment.
+into text and text into speech, and pay with Telegram Stars. Each user picks
+an AI provider (OpenAI by default, or Anthropic) and is offered only what it
+does. Built from MyShortClip's code: the same registration, languages,
+credits, safety checks, admin and deployment.
 
 Stack: Django 6.1, Celery + Redis, Postgres, Docker Compose, the project's
 own nginx container behind the server's edge proxy (`server-edge`).
 Settings split as `aistars/settings.py` with
 `aistars/c_settings/{dev,prod,test}.py`; project apps under `apps/`
-(`core`, `ai`, `billing`, `safety`, and `studio` for the AI tools).
+(`core`, `ai`, `billing`, `safety`, and `studio` for the AI tools). Two
+layers: the core (`apps/ai`: the functions, one adapter per provider in
+`apps/ai/adapters/`) and the presentation (`apps/studio`: the bot, built
+from what the user's provider offers, `offer.py`).
 
 ## Rules (read before every change)
 
@@ -49,6 +53,44 @@ touches one, update it in the same change.
 15. **Firewall.** The server sits behind a Hetzner Cloud Firewall (`FIREWALL.md` in `server-edge`): SSH (22) open, HTTP (80) only from Cloudflare's IP ranges, everything else closed, so the server's IP answers nothing on its own. A project never needs a firewall change.
 
 ## Changelog
+
+### 2026-10-22 — v0.9.0 — A provider-independent core; the bot offers what yours does
+
+The owner wants the core independent of the providers: the bot's functions
+(text, images, voice) defined once, each provider offering some of them, and
+users offered exactly what the provider they chose does. No fallback:
+Anthropic makes no images, so an Anthropic user is not offered images. A
+future provider without text is adapted to the same way.
+- **The core** (`apps/ai`). One adapter per provider (`apps/ai/adapters/`:
+  OpenAI, Anthropic) says what it does (`functions`: chat, image,
+  transcription, speech; the files its models read; moderation; its own cost
+  figures) and speaks its API. `clients.py` keeps the one way every call is
+  guarded, priced and recorded, and refuses a function the adapter does not
+  declare. Every "is this OpenAI?" outside the adapters is gone: chat,
+  images, voice, Office files, Moderation, the doctor, My finances. Adding a
+  provider: an adapter, its kind, its key and its models.
+- **What a provider offers** = what its adapter does ∩ the models users can
+  have (offered, priced, on, a key). A model whose use its provider cannot
+  run is never offered. "Default for users" is now one per use and provider.
+- **The presentation** (`apps/studio/offer.py`). Each user has a provider:
+  their choice (👤 Profile → 🧠 AI provider, shown when there are two or more,
+  with what each offers), else Runtime settings → Default AI provider
+  (openai), else the first that offers anything. The home buttons, help,
+  commands, agents, model lists, accepted voice notes and files, and the
+  buttons under results (🔊 Listen, 🖌 Edit this) come from it. Anything sent
+  for a tool it does not offer (a command, an old button, a voice note) gets
+  one line: "Not offered with Anthropic: Images. You can change the provider
+  in 👤 Profile → 🧠 AI provider."
+- **Changing provider**: a chat goes on with the new provider's model (the
+  history is ours); an image or voice step being asked for is dropped; what
+  is being made finishes. An agent's own model is used only for users of its
+  provider.
+- **The bot's own work** (safety judge, translation, chat memory and titles,
+  Find for me) keeps the owner's default models, whatever users choose.
+- Admin: AI → Providers shows what each can do and offers now; the doctor
+  lists each provider's offer and checks the default provider.
+- Tests: 644 (from 622): the adapters, an Anthropic user, an image-only test
+  provider, changing provider mid-chat and mid-step, the default provider.
 
 ### 2026-10-22 — v0.8.0 — A welcome gift of 💎 10, and 💎 for credits
 

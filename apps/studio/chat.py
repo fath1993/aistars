@@ -17,7 +17,7 @@ from django.db.models import Count
 from django.utils import timezone
 
 from apps.ai import clients
-from apps.ai.models import AIModel, Use
+from apps.ai.models import Use
 from apps.core import runtime
 from apps.core.i18n import gettext as _
 from apps.core.services import telegram
@@ -25,7 +25,7 @@ from apps.safety import checks
 from apps.safety.models import Result
 from apps.safety.texts import category_text
 
-from . import archive, demo, files, formatting, jobs, memory, texts
+from . import archive, demo, files, formatting, jobs, memory, offer, texts
 from .memory import CHARS_PER_TOKEN, attachments_of
 from .models import ACTIVE, Conversation, Job, Kind, Message, Profile, Role
 
@@ -68,18 +68,27 @@ def current(account):
 
 
 def model_of(account, conversation=None):
-    """The chat's model if users can have it, else the user's choice, else the default."""
-    is_demo = jobs.demo()
+    """
+    The chat's model, else the user's choice, else their provider's default:
+    always a chat model of the user's provider (a chat goes on with it after
+    they change provider); None when their provider does not chat.
+    """
     for model in (getattr(conversation, "model", None), profile(account).chat_model):
-        if model is not None and model.use == Use.CHAT and model.ready_for(is_demo):
+        if model is not None and model.use == Use.CHAT and offer.mine(account, model):
             return model
-    return AIModel.default_for(Use.CHAT, is_demo)
+    return offer.model(account, Use.CHAT)
+
+
+def agent_model(account, agent):
+    """The agent's own model when it is of the user's provider, else the user's."""
+    if agent is not None and agent.model is not None and offer.mine(account, agent.model):
+        return agent.model
+    return model_of(account)
 
 
 def new_conversation(account, assistant=None) -> Conversation:
     """A new chat; an empty current one is reused rather than piling up."""
-    model = (assistant.model if assistant is not None and assistant.model is not None
-             and assistant.model.ready_for(jobs.demo()) else model_of(account))
+    model = agent_model(account, assistant)
     conversation = current(account)
     if conversation is not None and not conversation.messages.exists():
         conversation.assistant, conversation.model, conversation.title = assistant, model, ""
@@ -162,9 +171,9 @@ def typical_price(model) -> int:
     return jobs.hold_for(model.cost_micros(*TYPICAL), model)
 
 
-def listen_price(text):
-    """The price on an answer's 🔊 Listen button, or None when nobody can read it."""
-    model = AIModel.default_for(Use.SPEECH, jobs.demo())
+def listen_price(account, text):
+    """The price on an answer's 🔊 Listen button, or None when nothing can read it aloud."""
+    model = offer.model(account, Use.SPEECH)
     if model is None or not text:
         return None
     from .voice import TTS_LIMIT
@@ -217,6 +226,8 @@ def send(account, chat_id, text, attachments=(), voice=False, conversation=None,
     held, then answered in the background. One that can cost more than the
     owner's threshold waits for the user to agree (out:send).
     """
+    if not offer.has(account, Use.CHAT):
+        return _notice(chat_id, offer.not_offered_text(account, Use.CHAT))
     attachments = list(attachments)
     limit = int(runtime.get("CHAT_MAX_MESSAGE_CHARS"))
     if len(text) > limit:
@@ -357,7 +368,7 @@ def retry(account, chat_id, failed_job):
     conversation = message.conversation
     model = model_of(account, conversation)
     if model is None:
-        return _notice(chat_id, texts.no_model_text())
+        return _notice(chat_id, offer.not_offered_text(account, Use.CHAT))
     if Job.objects.filter(conversation=conversation, kind=Kind.CHAT,
                           status__in=ACTIVE).exists():
         return _notice(chat_id, texts.busy_text())
@@ -495,7 +506,7 @@ def _write(job, reply, balance):
     footer = texts.footer(job.charged, balance, job.model)
     footer_plain = footer.replace("<i>", "").replace("</i>", "")
     answer_row = Message.objects.filter(job=job, role=Role.ASSISTANT).first()
-    markup = texts.answer_keyboard(answer_row.pk, listen_price(text), job,
+    markup = texts.answer_keyboard(answer_row.pk, listen_price(job.account, text), job,
                                    texts.low_balance(balance),
                                    len(open_files(job.conversation, job.model)))
 

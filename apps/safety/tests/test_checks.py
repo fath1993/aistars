@@ -9,6 +9,7 @@ import requests
 from django.test import TestCase
 
 from apps.ai import clients
+from apps.ai.adapters import base
 from apps.ai.models import AIModel, Provider
 from apps.core import runtime
 from apps.core.models import AccountStatus
@@ -91,7 +92,7 @@ class ModerationTests(TestCase):
         Provider.objects.filter(kind="openai").update(api_key="sk-openai")
 
     def run_with(self, answer, photo=None, photos=None):
-        with mock.patch("apps.safety.checks.requests.post", return_value=answer) as post, \
+        with mock.patch("requests.post", return_value=answer) as post, \
                 mock.patch.object(images, "prepare", return_value=b"\xff\xd8jpeg"):
             finding = checks.moderation(request(photo=photo, photos=photos))
         self.calls = post.call_args_list
@@ -116,7 +117,7 @@ class ModerationTests(TestCase):
 
     def test_a_flagged_second_photo_blocks(self):
         answers = iter([moderation_answer(), moderation_answer(True, violence=True)])
-        with mock.patch("apps.safety.checks.requests.post",
+        with mock.patch("requests.post",
                         side_effect=lambda *a, **k: next(answers)), \
                 mock.patch.object(images, "prepare", return_value=b"\xff\xd8jpeg"):
             finding = checks.moderation(request(photos=[{"file_id": "p1"}, {"file_id": "p2"}]))
@@ -133,13 +134,13 @@ class ModerationTests(TestCase):
         self.assertEqual(self.run_with(Answer({}, 500))[0].verdict, Verdict.ERROR)
         self.assertEqual(self.run_with(Answer(ValueError()))[0].verdict, Verdict.ERROR)
         self.assertEqual(self.run_with(Answer({"results": []}))[0].verdict, Verdict.ERROR)
-        with mock.patch("apps.safety.checks.requests.post",
+        with mock.patch("requests.post",
                         side_effect=requests.ConnectionError("x")):
             self.assertEqual(checks.moderation(request()).verdict, Verdict.ERROR)
 
     def test_without_an_openai_key_it_is_skipped(self):
         Provider.objects.filter(kind="openai").update(api_key="")
-        with mock.patch("apps.safety.checks.requests.post") as post:
+        with mock.patch("requests.post") as post:
             self.assertEqual(checks.moderation(request()).verdict, Verdict.SKIPPED)
         post.assert_not_called()
 
@@ -149,7 +150,7 @@ class JudgeTests(TestCase):
         Provider.objects.filter(kind="openai").update(api_key="sk-openai")
 
     def run_with(self, text, photo=None, prompt="a cat on a beach"):
-        with mock.patch.object(clients, "_post", return_value=judge_answer(text)) as post, \
+        with mock.patch.object(base, "post", return_value=judge_answer(text)) as post, \
                 mock.patch.object(images, "prepare", return_value=b"\xff\xd8jpeg"):
             finding = checks.judge(request(prompt, photo))
         return finding, post.call_args
@@ -183,7 +184,7 @@ class JudgeTests(TestCase):
             self.assertEqual(self.run_with(text)[0].verdict, Verdict.ERROR, text)
 
     def test_a_provider_error_fails_closed(self):
-        with mock.patch.object(clients, "_post", side_effect=clients.AIError("HTTP 529")):
+        with mock.patch.object(base, "post", side_effect=clients.AIError("HTTP 529")):
             finding = checks.judge(request())
         self.assertEqual((finding.verdict, finding.detail), (Verdict.ERROR, "HTTP 529"))
 
@@ -374,7 +375,7 @@ class ChatCheckTests(TestCase):
         Provider.objects.filter(kind="openai").update(api_key="sk-openai")
 
     def moderate(self, answer, tool="chat"):
-        with mock.patch("apps.safety.checks.requests.post", return_value=answer):
+        with mock.patch("requests.post", return_value=answer):
             return checks.moderation(request("how do bruises heal?", tool=tool))
 
     def test_image_words_do_not_block_a_chat(self):
@@ -398,7 +399,7 @@ class ChatCheckTests(TestCase):
         self.assertEqual((finding.verdict, finding.category), (Verdict.BLOCK, Category.ILLEGAL))
 
     def test_the_judge_is_not_asked_about_chats(self):
-        with mock.patch.object(clients, "_post") as post:
+        with mock.patch.object(base, "post") as post:
             finding = checks.judge(request(tool="chat"))
         self.assertEqual(finding.verdict, Verdict.SKIPPED)
         post.assert_not_called()

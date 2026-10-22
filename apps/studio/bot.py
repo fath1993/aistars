@@ -4,24 +4,77 @@ language. Anything typed that is not an answer to a question the bot asked
 is a chat message; photos, files and voice notes go to the chat too, unless
 a tool asked for them.
 
-Buttons: chat:, ag: (agents), img:, voice:, use: (usage) and me: (About me)
-on the panel; out: on messages that are not the panel (an answer, an image,
-a notice).
+Buttons: chat:, ag: (agents), img:, voice:, use: (usage), me: (About me) and
+ai: (the AI provider) on the panel; out: on messages that are not the panel
+(an answer, an image, a notice).
+
+Everything here is built from what the user's AI provider offers (offer.py):
+a tool it does not offer has no button and no command, and a button or
+command for it (an old message, a provider changed since) gets one line
+saying so.
 """
 
 from django.core.cache import cache
 
-from apps.ai.models import AIModel, Use
 from apps.billing import ledger
 from apps.billing import texts as billing_texts
-from apps.core import menus
+from apps.core import activity, menus
 from apps.core.i18n import gettext as _
+from apps.core.models import LogCategory
 from apps.core.services import telegram, ui
 
-from . import agents, catalog, chat, images, jobs, memory, state, texts, usage, voice
+from . import agents, catalog, chat, images, jobs, memory, offer, state, texts, usage, voice
 from .models import Category, Conversation, Job, Message, Role
 
-COMMANDS = ("new", "chat", "chats", "agents", "usage", "images", "voice")
+# A command, and what the user's provider must offer for it ("" nothing).
+VOICE = offer.VOICE
+COMMANDS = {"new": offer.CHAT, "chat": offer.CHAT, "chats": offer.CHAT,
+            "agents": offer.CHAT, "usage": "", "images": offer.IMAGE, "voice": VOICE}
+
+
+# --------------------------------------------------------------------------
+# What is offered
+# --------------------------------------------------------------------------
+
+def tools(account) -> list:
+    """The functions the user is offered; none while the tools are not open to them."""
+    return offer.functions(account) if jobs.may_use(account) else []
+
+
+def help_facts(account):
+    """(functions, what the chat reads, users can choose a provider) for the help."""
+    functions = tools(account)
+    if not functions:
+        return None
+    model = chat.model_of(account) if offer.CHAT in functions else None
+    from . import files
+
+    return functions, files.readable(model) if model is not None else [], \
+        len(offer.providers()) > 1
+
+
+def _offered(account, need) -> bool:
+    return not need or offer.has(account, need)
+
+
+def _not_offered(account, need) -> str:
+    return offer.not_offered_text(account, need)
+
+
+def _needs(verb, action) -> str:
+    """What a button needs the user's provider to offer ("" nothing)."""
+    if verb in ("chat", "ag", "me"):
+        return offer.CHAT
+    if verb == "img":
+        return offer.IMAGE
+    if verb == "voice":
+        return {"stt": offer.TRANSCRIPTION, "tts": offer.SPEECH, "voices": offer.SPEECH,
+                "set": offer.SPEECH, "go": offer.SPEECH}.get(action, VOICE)
+    if verb == "out":
+        return {"say": offer.SPEECH, "again": offer.IMAGE, "edit": offer.IMAGE,
+                "retry": offer.CHAT, "send": offer.CHAT, "sendnew": offer.CHAT,
+                "new": offer.CHAT, "closefiles": offer.CHAT, "models": offer.CHAT}.get(action, "")
+    return ""
 
 
 # --------------------------------------------------------------------------
@@ -31,16 +84,20 @@ COMMANDS = ("new", "chat", "chats", "agents", "usage", "images", "voice")
 def home_lines(account) -> list:
     if not jobs.may_use(account):
         return []
-    conversation = chat.current(account)
-    return texts.home_lines(conversation, chat.model_of(account, conversation),
-                            ledger.balance(account))
+    talks = offer.CHAT in tools(account)
+    conversation = chat.current(account) if talks else None
+    provider = offer.provider_of(account) if len(offer.providers()) > 1 else None
+    return texts.home_lines(conversation, chat.model_of(account, conversation) if talks else None,
+                            ledger.balance(account), provider, talks)
 
 
 def home_rows(account) -> list:
-    if not jobs.may_use(account):
+    functions = tools(account)
+    if not functions:
         return []
-    conversation = chat.current(account)
-    return texts.home_rows(conversation is not None and conversation.messages.exists())
+    conversation = chat.current(account) if offer.CHAT in functions else None
+    return texts.home_rows(conversation is not None and conversation.messages.exists(),
+                           functions)
 
 
 def account_buttons(account) -> list:
@@ -64,6 +121,10 @@ def _show(account, chat_id, text, markup, fresh=False):
 def handle_command(account, chat_id, command) -> bool:
     if not jobs.may_use(account) or command not in COMMANDS:
         return False
+    if not _offered(account, COMMANDS[command]):
+        telegram.send_message(chat_id, telegram.esc(_not_offered(account, COMMANDS[command])),
+                              reply_markup=texts.notice_keyboard())
+        return True
     if command == "new":
         _new_chat(account, chat_id, fresh=True)
     elif command == "chat":
@@ -87,6 +148,10 @@ def open_start(account, chat_id, payload) -> bool:
     agent = agents.from_start(payload)
     if agent is None or not jobs.may_use(account):
         return False
+    if not offer.has(account, offer.CHAT):
+        telegram.send_message(chat_id, telegram.esc(_not_offered(account, offer.CHAT)),
+                              reply_markup=texts.notice_keyboard())
+        return True
     _remember_back(account, {"kind": "home"})
     _card(account, chat_id, agent, fresh=True)
     return True
@@ -156,13 +221,20 @@ def handle_media(account, chat_id, message) -> bool:
 def handle_callback(account, chat_id, verb, argument, message_id=None):
     """The answer to show ('' for none), or None for a verb that is not ours."""
     handler = {"chat": _chat, "ag": _agents, "img": _images, "voice": _voice, "use": _usage,
-               "me": _me, "out": _out}.get(verb)
+               "me": _me, "ai": _provider, "out": _out}.get(verb)
     if handler is None:
         return None
     if not jobs.may_use(account):
         ui.screen(account, chat_id, menus.home_text(account), menus.home_keyboard(account))
         return ""
     action, _sep, value = argument.partition(":")
+    need = _needs(verb, action)
+    if not _offered(account, need):
+        # A button from before the provider changed, or an old message.
+        state.stop(account)
+        if verb != "out":
+            ui.screen(account, chat_id, menus.home_text(account), menus.home_keyboard(account))
+        return telegram.Alert(_not_offered(account, need))
     if verb != "out" and not (verb == "img" and action in ("size", "quality", "go", "prompt")) \
             and not (verb == "voice" and action in ("go", "voices", "set")):
         # Leaving a question unanswered: typed text is a chat message again.
@@ -224,8 +296,7 @@ def _chat(account, chat_id, action, value):
     elif action == "models":
         _models_screen(account, chat_id)
     elif action == "model":
-        models = {str(model.pk): model
-                  for model in AIModel.offered_for(Use.CHAT, jobs.demo())}
+        models = {str(model.pk): model for model in offer.models(account, offer.CHAT)}
         if value in models:
             chat.choose_model(account, chat.current(account), models[value])
             _chat_screen(account, chat_id)
@@ -295,7 +366,7 @@ def _close_files(account, chat_id, value, conversation=None):
 
 
 def _models_screen(account, chat_id, fresh=False):
-    models = AIModel.offered_for(Use.CHAT, jobs.demo())
+    models = offer.models(account, offer.CHAT)
     current = chat.model_of(account, chat.current(account))
     typical = {model.pk: chat.typical_price(model) for model in models}
     _show(account, chat_id, texts.models_text(models, typical),
@@ -314,8 +385,7 @@ def _remember_back(account, where):
 
 
 def _card(account, chat_id, agent, fresh=False):
-    model = agent.model if agent.model is not None and agent.model.ready_for(jobs.demo()) \
-        else chat.model_of(account)
+    model = chat.agent_model(account, agent)
     saved = agents.saved_by(account, agent)
     _show(account, chat_id,
           texts.card_text(agent, model, chat.typical_price(model) if model else 0, saved),
@@ -495,8 +565,36 @@ def _about_typed(account, chat_id, text):
 
 
 def profile_buttons(account) -> list:
-    """On the Profile screen."""
-    return [texts.about_button()] if jobs.may_use(account) else []
+    """On the Profile screen, next to Language."""
+    return [texts.about_button()] if offer.CHAT in tools(account) else []
+
+
+def profile_rows(account) -> list:
+    """On the Profile screen: the AI provider, when users can choose one."""
+    if not jobs.may_use(account) or len(offer.providers()) < 2:
+        return []
+    provider = offer.provider_of(account)
+    return [[texts.provider_button(provider)]] if provider is not None else []
+
+
+# ---- AI provider ------------------------------------------------------------
+
+def _provider(account, chat_id, action, value):
+    """ai: the providers and what each offers; ai:set:<kind> chooses one."""
+    available = offer.providers()
+    chosen = next((provider for provider in available if provider.kind == value), None)
+    toast = ""
+    if action == "set" and chosen is not None:
+        if chosen != offer.provider_of(account):
+            offer.choose(account, chosen)
+            activity.info(LogCategory.ACCOUNT, "provider_changed",
+                          f"{account} chose {chosen}", account=account)
+        toast = f"🧠 {chosen}"
+    current = offer.provider_of(account)
+    rows = [(provider, provider.offers(jobs.demo())) for provider in available]
+    _show(account, chat_id, texts.provider_text(rows, current),
+          texts.provider_keyboard(rows, current))
+    return toast
 
 
 def privacy_text() -> str:

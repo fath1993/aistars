@@ -1,51 +1,34 @@
 """
-Calling the AI providers. One function per kind of work:
+The core of every AI call: one function per thing the bot does.
 
     ask          one question, one answer (translation, the safety judge)
     chat         a conversation, with photos and files, streamed as it is
-                 written (the bot's Chat); OpenAI's through its Responses API
+                 written (the bot's Chat)
     image        an image made from a prompt, or a photo changed
     transcribe   a voice note turned into text
     speak        a text read aloud, as a voice note
 
 Every call:
+  - goes to the model's provider through its adapter (adapters/), and is
+    refused when that provider does not do it;
   - is refused while the Control panel's kill switch is on or a USD cap is
     reached;
   - is priced from what the provider reports (tokens) or from what was sent
     (seconds of audio, characters), with the model's prices, and recorded in
-    the spend ledger;
+    the spend ledger and as an AICall;
   - is written to the activity log, with its cost.
 
-The providers are called over plain HTTP (requests), not their SDKs: a few
-small JSON APIs do not justify more dependencies. Images, voice to text and
-text to speech are OpenAI's; Anthropic's models chat.
+Nothing here knows which provider it is: what each one does, and how, is its
+adapter's.
 """
 
-import base64
-import json
 import logging
 from dataclasses import dataclass
 
-import requests
-
-from .models import ProviderKind
+from . import adapters
+from .adapters.base import AIError, ProviderRefused, Usage  # noqa: F401  (the core's errors)
 
 logger = logging.getLogger(__name__)
-
-TIMEOUT = 120
-# Streaming: the connection, then the longest silence between two pieces
-# (a reasoning model may think for a while before its first word).
-STREAM_TIMEOUT = (15, 180)
-IMAGE_TIMEOUT = 300
-ANTHROPIC_VERSION = "2023-06-01"
-
-
-class AIError(Exception):
-    """The call did not produce an answer; the message says why."""
-
-
-class ProviderRefused(AIError):
-    """The provider's own safety system refused the request."""
 
 
 @dataclass
@@ -62,38 +45,25 @@ class Reply:
 
 
 @dataclass
-class Usage:
-    """Input in all, of it read from and written to the cache; output."""
-    input: int = 0
-    cached: int = 0
-    written: int = 0
-    output: int = 0
-
-    @classmethod
-    def openai(cls, usage):
-        details = (usage or {}).get("input_tokens_details") or {}
-        return cls(int((usage or {}).get("input_tokens", 0) or 0),
-                   int(details.get("cached_tokens", 0) or 0),
-                   int(details.get("cache_write_tokens", 0) or 0),
-                   int((usage or {}).get("output_tokens", 0) or 0))
-
-    @classmethod
-    def anthropic(cls, usage, output=None):
-        """Anthropic's input_tokens are only what was neither read nor written."""
-        usage = usage or {}
-        cached = int(usage.get("cache_read_input_tokens", 0) or 0)
-        written = int(usage.get("cache_creation_input_tokens", 0) or 0)
-        return cls(int(usage.get("input_tokens", 0) or 0) + cached + written, cached, written,
-                   int(usage.get("output_tokens", 0) or 0) if output is None else output)
-
-
-@dataclass
 class Picture:
     data: bytes
     input_tokens: int
     image_input_tokens: int
     output_tokens: int
     cost_micros: int
+
+
+# What each core function is called when a provider does not do it.
+DOES_NOT = {"chat": "chat", "image": "make images", "transcription": "transcribe",
+            "speech": "speak"}
+
+
+def _adapter(model, function):
+    """The adapter that carries out `function` for `model`, or AIError."""
+    adapter = adapters.of(model.provider)
+    if function not in adapter.functions:
+        raise AIError(f"{model.provider} does not {DOES_NOT[function]} here")
+    return adapter
 
 
 def _guard(model, estimate_micros=0):
@@ -125,50 +95,6 @@ def _record(model, purpose, cost, message, detail):
                   detail={"model": model.model_id, "cost_micros": cost, **detail})
 
 
-def _headers(model):
-    key = model.provider.api_key.strip()
-    if model.provider.kind == ProviderKind.ANTHROPIC:
-        return {"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION}
-    return {"Authorization": f"Bearer {key}"}
-
-
-def _error(response):
-    """The provider's own words for a failed call, as an AIError."""
-    try:
-        body = response.json()
-    except ValueError:
-        return AIError(f"HTTP {response.status_code}, not JSON")
-    error = body.get("error") if isinstance(body, dict) else None
-    message = error.get("message") if isinstance(error, dict) else error
-    code = error.get("code") if isinstance(error, dict) else ""
-    text = f"HTTP {response.status_code}: {message or body}"
-    if code == "moderation_blocked" or "safety system" in str(message or ""):
-        return ProviderRefused(text)
-    return AIError(text)
-
-
-def _post(url, headers, payload=None, timeout=TIMEOUT, files=None, data=None):
-    try:
-        response = requests.post(url, headers=headers, json=payload, files=files, data=data,
-                                 timeout=timeout)
-    except requests.RequestException as exc:
-        raise AIError(f"could not reach the provider: {type(exc).__name__}") from exc
-    if response.status_code != 200:
-        raise _error(response)
-    return response
-
-
-def _json(response):
-    try:
-        return response.json()
-    except ValueError:
-        raise AIError(f"HTTP {response.status_code}, not JSON") from None
-
-
-def _encoded(data) -> str:
-    return base64.b64encode(data).decode("ascii")
-
-
 # --------------------------------------------------------------------------
 # One question, one answer
 # --------------------------------------------------------------------------
@@ -194,16 +120,12 @@ def chat(model, system, messages, purpose, max_tokens=None, on_text=None,
     "images": [(bytes, media type)], "files": [{"name", "media_type",
     "data"}]}, oldest first. With `on_text`, the answer is streamed and
     on_text(text so far) is called as it grows. `cache_key` (a chat's) keeps
-    its start in the provider's cache: OpenAI caches by itself, and the key
-    keeps one user's cache apart from another's; Anthropic caches only when
-    asked.
+    its start in the provider's cache, apart from other users' chats.
     """
+    adapter = _adapter(model, "chat")
     _guard(model, estimate_micros)
     max_tokens = max_tokens or model.max_output_tokens
-    if model.provider.kind == ProviderKind.ANTHROPIC:
-        text, usage, cut = _anthropic(model, system, messages, max_tokens, on_text, cache_key)
-    else:
-        text, usage, cut = _openai(model, system, messages, max_tokens, on_text, cache_key)
+    text, usage, cut = adapter.chat(model, system, messages, max_tokens, on_text, cache_key)
     cost = model.cost_micros(usage.input, usage.output, cached=usage.cached,
                              written=usage.written)
     _record(model, purpose, cost,
@@ -214,161 +136,6 @@ def chat(model, system, messages, purpose, max_tokens=None, on_text=None,
     return Reply(text, usage.input, usage.output, cost, cut, usage.cached, usage.written)
 
 
-def _data_url(media_type, data) -> str:
-    return f"data:{media_type};base64,{_encoded(data)}"
-
-
-def _openai_content(message):
-    """
-    The Responses API's input: an answer as plain text; the user's files
-    and photos before their words.
-    """
-    if message["role"] == "assistant":
-        return message["text"]
-    parts = [{"type": "input_file", "filename": item["name"],
-              "file_data": _data_url(item["media_type"], item["data"])}
-             for item in message.get("files") or []]
-    parts += [{"type": "input_image", "image_url": _data_url(media_type, data)}
-              for data, media_type in message.get("images") or []]
-    return parts + [{"type": "input_text", "text": message["text"]}]
-
-
-def _openai(model, system, messages, max_tokens, on_text, cache_key=""):
-    """
-    OpenAI's Responses API: the one that reads every kind of file (Chat
-    Completions reads only PDFs). Nothing is stored at OpenAI (store false).
-    """
-    payload = {
-        "model": model.model_id,
-        "instructions": system,
-        "input": [{"role": message["role"], "content": _openai_content(message)}
-                  for message in messages],
-        "max_output_tokens": max_tokens,
-        "store": False,
-    }
-    if cache_key:
-        payload["prompt_cache_key"] = cache_key
-    url = f"{model.provider.endpoint}/v1/responses"
-    if on_text is None:
-        return _openai_result(_json(_post(url, _headers(model), payload)))
-
-    payload["stream"] = True
-    text, result = "", None
-    for event in _events(url, _headers(model), payload):
-        kind = event.get("type")
-        if kind == "response.output_text.delta":
-            text += event.get("delta") or ""
-            on_text(text)
-        elif kind in ("response.completed", "response.incomplete"):
-            result = event.get("response") or {}
-        elif kind == "response.failed":
-            error = (event.get("response") or {}).get("error") or {}
-            raise AIError(f"the answer failed: {error.get('message') or error}")
-        elif kind == "error":
-            raise AIError(f"stream error: {event.get('message') or event}")
-    if result is None:
-        raise AIError("the answer stopped before it was complete")
-    return text, Usage.openai(result.get("usage")), _cut_off(result)
-
-
-def _openai_result(body):
-    text = "".join(part.get("text", "") for item in body.get("output") or []
-                   if item.get("type") == "message"
-                   for part in item.get("content") or [] if part.get("type") == "output_text")
-    return text, Usage.openai(body.get("usage")), _cut_off(body)
-
-
-def _cut_off(response) -> bool:
-    details = response.get("incomplete_details") or {}
-    return response.get("status") == "incomplete" and details.get("reason") == "max_output_tokens"
-
-
-def _anthropic_content(message):
-    """Photos as images, PDFs as documents, text files as text documents."""
-    if not message.get("images") and not message.get("files"):
-        return message["text"]
-    parts = []
-    for item in message.get("files") or []:
-        if item["media_type"] == "application/pdf":
-            source = {"type": "base64", "media_type": item["media_type"],
-                      "data": _encoded(item["data"])}
-        else:
-            try:
-                source = {"type": "text", "media_type": "text/plain",
-                          "data": item["data"].decode("utf-8")}
-            except UnicodeDecodeError:
-                raise AIError(f"{item['name']} is not plain text, which is all "
-                              "Anthropic's models read besides PDFs") from None
-        parts.append({"type": "document", "source": source, "title": item["name"]})
-    parts += [{"type": "image", "source": {"type": "base64", "media_type": media_type,
-                                           "data": _encoded(data)}}
-              for data, media_type in message.get("images") or []]
-    return parts + [{"type": "text", "text": message["text"]}]
-
-
-def _anthropic(model, system, messages, max_tokens, on_text, cache_key=""):
-    payload = {
-        "model": model.model_id, "max_tokens": max_tokens, "system": system,
-        "messages": [{"role": message["role"], "content": _anthropic_content(message)}
-                     for message in messages],
-    }
-    if cache_key:
-        # Automatic caching: the breakpoint moves forward as the chat grows.
-        payload["cache_control"] = {"type": "ephemeral"}
-    url = f"{model.provider.endpoint}/v1/messages"
-    if on_text is None:
-        body = _json(_post(url, _headers(model), payload))
-        text = "".join(part.get("text", "") for part in body.get("content", [])
-                       if part.get("type") == "text")
-        return text, Usage.anthropic(body.get("usage")), body.get("stop_reason") == "max_tokens"
-
-    payload["stream"] = True
-    text, started, tokens_out, stop = "", {}, 0, ""
-    for event in _events(url, _headers(model), payload):
-        kind = event.get("type")
-        if kind == "error":
-            raise AIError(f"stream error: {(event.get('error') or {}).get('message', event)}")
-        if kind == "message_start":
-            started = (event.get("message") or {}).get("usage") or {}
-        elif kind == "content_block_delta":
-            piece = (event.get("delta") or {}).get("text") or ""
-            if piece:
-                text += piece
-                on_text(text)
-        elif kind == "message_delta":
-            tokens_out = int((event.get("usage") or {}).get("output_tokens", tokens_out))
-            stop = (event.get("delta") or {}).get("stop_reason") or stop
-    return text, Usage.anthropic(started, tokens_out), stop == "max_tokens"
-
-
-def _events(url, headers, payload):
-    """The JSON objects of a server-sent event stream."""
-    try:
-        response = requests.post(url, headers=headers, json=payload, stream=True,
-                                 timeout=STREAM_TIMEOUT)
-    except requests.RequestException as exc:
-        raise AIError(f"could not reach the provider: {type(exc).__name__}") from exc
-    with response:
-        if response.status_code != 200:
-            raise _error(response)
-        # text/event-stream usually names no charset, and requests would then
-        # read it as Latin-1: every non-English answer would come out garbled.
-        response.encoding = "utf-8"
-        try:
-            for line in response.iter_lines(decode_unicode=True):
-                if not line or not line.startswith("data:"):
-                    continue
-                data = line[5:].strip()
-                if data == "[DONE]":
-                    return
-                try:
-                    yield json.loads(data)
-                except ValueError:
-                    continue
-        except requests.RequestException as exc:
-            raise AIError(f"the answer stopped coming: {type(exc).__name__}") from exc
-
-
 # --------------------------------------------------------------------------
 # Images
 # --------------------------------------------------------------------------
@@ -377,40 +144,20 @@ def image(model, prompt, size, quality, photos=(), purpose="image",
           estimate_micros=0) -> Picture:
     """
     Make one image from `prompt`, or change `photos` ([(bytes, media type)])
-    by it. Priced from the tokens OpenAI reports; without them, the estimate.
-    Raises ProviderRefused when OpenAI's own safety system says no.
+    by it. Priced from the tokens the provider reports; without them, the
+    estimate. Raises ProviderRefused when the provider's own safety system
+    says no.
     """
+    adapter = _adapter(model, "image")
     _guard(model, estimate_micros)
-    if model.provider.kind != ProviderKind.OPENAI:
-        raise AIError(f"{model.provider} does not make images here")
-    headers = _headers(model)
-    options = {"model": model.model_id, "prompt": prompt, "size": size, "quality": quality,
-               "n": 1}
-    if photos:
-        field = "image" if len(photos) == 1 else "image[]"
-        files = [(field, (f"photo{number}.jpg", data, media_type))
-                 for number, (data, media_type) in enumerate(photos, 1)]
-        response = _post(f"{model.provider.endpoint}/v1/images/edits", headers,
-                         files=files, data={k: str(v) for k, v in options.items()},
-                         timeout=IMAGE_TIMEOUT)
-    else:
-        response = _post(f"{model.provider.endpoint}/v1/images/generations", headers,
-                         options, timeout=IMAGE_TIMEOUT)
-    body = _json(response)
-    try:
-        data = base64.b64decode(body["data"][0]["b64_json"])
-    except (KeyError, IndexError, TypeError, ValueError):
-        raise AIError("no image in the answer") from None
-    usage = body.get("usage") or {}
-    details = usage.get("input_tokens_details") or {}
-    tokens_in = int(details.get("text_tokens", usage.get("input_tokens", 0)) or 0)
-    image_in = int(details.get("image_tokens", 0) or 0)
-    tokens_out = int(usage.get("output_tokens", 0) or 0)
-    cost = model.cost_micros(tokens_in, tokens_out, image_in) if usage else estimate_micros
+    made = adapter.image(model, prompt, size, quality, list(photos))
+    tokens_in, image_in, tokens_out = made.text_tokens, made.image_tokens, made.output_tokens
+    cost = model.cost_micros(tokens_in, tokens_out, image_in) if made.reported \
+        else estimate_micros
     _record(model, purpose, cost, f"{size} {quality}, {tokens_in}+{image_in} in, "
             f"{tokens_out} out", {"input_tokens": tokens_in, "image_input_tokens": image_in,
                                   "output_tokens": tokens_out})
-    return Picture(data, tokens_in, image_in, tokens_out, cost)
+    return Picture(made.data, tokens_in, image_in, tokens_out, cost)
 
 
 # --------------------------------------------------------------------------
@@ -419,31 +166,22 @@ def image(model, prompt, size, quality, photos=(), purpose="image",
 
 def transcribe(model, audio, filename, seconds, purpose="transcription") -> tuple:
     """(text, cost) of a voice note or audio file of `seconds`."""
+    adapter = _adapter(model, "transcription")
     cost = model.audio_cost_micros(seconds)
     _guard(model, cost)
-    if model.provider.kind != ProviderKind.OPENAI:
-        raise AIError(f"{model.provider} does not transcribe here")
-    response = _post(f"{model.provider.endpoint}/v1/audio/transcriptions", _headers(model),
-                     files={"file": (filename, audio)},
-                     data={"model": model.model_id, "response_format": "json"})
-    text = str(_json(response).get("text") or "").strip()
+    text = adapter.transcribe(model, audio, filename)
     _record(model, purpose, cost, f"{seconds:.0f} s of audio", {"seconds": seconds})
     return text, cost
 
 
 def speak(model, text, voice, purpose="speech") -> tuple:
     """(Ogg Opus bytes, cost): a voice note Telegram plays as one."""
+    adapter = _adapter(model, "speech")
     cost = model.speech_cost_micros(len(text))
     _guard(model, cost)
-    if model.provider.kind != ProviderKind.OPENAI:
-        raise AIError(f"{model.provider} does not speak here")
-    response = _post(f"{model.provider.endpoint}/v1/audio/speech", _headers(model),
-                     {"model": model.model_id, "input": text, "voice": voice,
-                      "response_format": "opus"})
-    if not response.content:
-        raise AIError("no audio in the answer")
+    data = adapter.speak(model, text, voice)
     _record(model, purpose, cost, f"{len(text)} characters read", {"characters": len(text)})
-    return response.content, cost
+    return data, cost
 
 
 # --------------------------------------------------------------------------
@@ -452,54 +190,21 @@ def speak(model, text, voice, purpose="speech") -> tuple:
 
 def list_models(provider) -> list:
     """The model IDs the provider says this key can use. Raises AIError."""
-    key = provider.api_key.strip()
-    if not key:
+    if not provider.api_key.strip():
         raise AIError(f"{provider} has no API key")
-    headers = ({"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION}
-               if provider.kind == ProviderKind.ANTHROPIC else {"Authorization": f"Bearer {key}"})
-    params = {"limit": 1000} if provider.kind == ProviderKind.ANTHROPIC else None
-    try:
-        response = requests.get(f"{provider.endpoint}/v1/models", headers=headers,
-                                params=params, timeout=30)
-    except requests.RequestException as exc:
-        raise AIError(f"could not reach {provider}: {type(exc).__name__}") from exc
-    if response.status_code != 200:
-        raise _error(response)
-    return sorted(str(row.get("id")) for row in _json(response).get("data") or []
-                  if row.get("id"))
+    return adapters.of(provider).list_models(provider)
 
 
 def billed_costs(provider, start, end) -> int:
     """
-    What OpenAI itself says the organization spent from `start` to `end`
-    (datetimes), in micro-USD, from its Costs API with the Admin key. Raises
-    AIError (no Admin key, or OpenAI refused).
+    What the provider itself says was spent from `start` to `end`
+    (datetimes), in micro-USD, read with its Admin key. Raises AIError (no
+    Admin key, the provider does not report it, or it refused).
     """
-    key = provider.admin_key.strip()
-    if provider.kind != ProviderKind.OPENAI or not key:
+    adapter = adapters.of(provider)
+    if not adapter.reports_costs or not provider.admin_key.strip():
         raise AIError(f"{provider} has no Admin key")
-    total, page = 0.0, None
-    for _ in range(12):   # at most a year of daily buckets, 31 a page
-        params = {"start_time": int(start.timestamp()), "end_time": int(end.timestamp()),
-                  "bucket_width": "1d", "limit": 31}
-        if page:
-            params["page"] = page
-        try:
-            response = requests.get(f"{provider.endpoint}/v1/organization/costs",
-                                    headers={"Authorization": f"Bearer {key}"},
-                                    params=params, timeout=TIMEOUT)
-        except requests.RequestException as exc:
-            raise AIError(f"could not reach the provider: {type(exc).__name__}") from exc
-        if response.status_code != 200:
-            raise _error(response)
-        body = _json(response)
-        for bucket in body.get("data") or []:
-            for result in bucket.get("results") or []:
-                total += float((result.get("amount") or {}).get("value") or 0)
-        page = body.get("next_page")
-        if not page:
-            break
-    return round(total * 1_000_000)
+    return adapter.billed_costs(provider, start, end)
 
 
 def test_provider(provider) -> tuple:

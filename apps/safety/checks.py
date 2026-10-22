@@ -4,8 +4,8 @@ price is even shown. Image requests (Create an image, Edit a photo) go
 through three layers, in order; the first block stops it:
 
     blocklist    words and phrases from the admin, whole words. Free.
-    moderation   OpenAI Moderation on the prompt and the photo. Free; needs
-                 an OpenAI key, and is skipped without one.
+    moderation   a provider's free moderation (OpenAI's) on the prompt and the
+                 photo; skipped when no provider that has one has a key.
     judge        an AI model with vision reads the prompt and the photo
                  against the policy text from the admin.
 
@@ -28,7 +28,6 @@ import time
 import unicodedata
 from dataclasses import dataclass
 
-import requests
 
 from apps.core import activity
 from apps.core.models import LogCategory
@@ -38,10 +37,8 @@ from .models import BlockedTerm, Category, Check, Layer, Policy, Result, Review,
 
 logger = logging.getLogger(__name__)
 
-MODERATION_MODEL = "omni-moderation-latest"
-MODERATION_TIMEOUT = 30
-
-# OpenAI's categories, most serious first: the first flagged one is shown.
+# The moderation categories (OpenAI's names), most serious first: the first
+# flagged one is shown.
 MODERATION_CATEGORIES = (
     ("sexual/minors", Category.MINORS),
     ("self-harm", Category.SELF_HARM),
@@ -127,49 +124,33 @@ def blocklist(request) -> Finding:
     return Finding(Verdict.ALLOW)
 
 
-def moderation(request) -> Finding:
-    from apps.ai.clients import _encoded
-    from apps.ai.models import Provider, ProviderKind
+def moderator():
+    """The provider whose free moderation reads requests (the first with a key), or None."""
+    from apps.ai import adapters
+    from apps.ai.models import Provider
 
-    provider = Provider.objects.filter(kind=ProviderKind.OPENAI).first()
-    if provider is None or not provider.usable:
-        return Finding(Verdict.SKIPPED, detail="no OpenAI key (AI → Providers)")
-    # The prompt with the first photo, then each further photo on its own:
-    # one image per moderation call.
-    photos = request.images()
-    calls = [[{"type": "text", "text": request.prompt}]]
-    for number, image in enumerate(photos):
-        item = {"type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{_encoded(image)}"}}
-        if number == 0:
-            calls[0].append(item)
-        else:
-            calls.append([item])
-    for inputs in calls:
-        try:
-            response = requests.post(
-                f"{provider.endpoint}/v1/moderations",
-                headers={"Authorization": f"Bearer {provider.api_key.strip()}"},
-                json={"model": MODERATION_MODEL, "input": inputs},
-                timeout=MODERATION_TIMEOUT)
-        except requests.RequestException as exc:
-            return Finding(Verdict.ERROR, detail=f"network: {type(exc).__name__}")
-        if response.status_code != 200:
-            return Finding(Verdict.ERROR, detail=f"HTTP {response.status_code}")
-        try:
-            result = response.json()["results"][0]
-            flagged = bool(result["flagged"])
-            flags = [name for name, on in (result.get("categories") or {}).items() if on]
-        except (ValueError, KeyError, IndexError, TypeError, AttributeError):
-            return Finding(Verdict.ERROR, detail="unreadable answer")
-        if request.chat:
-            flags = [name for name in flags if name in CHAT_BLOCKS]
-            flagged = bool(flags)
-        if flagged:
-            category = next((mapped for prefix, mapped in MODERATION_CATEGORIES
-                             if any(name.startswith(prefix) for name in flags)),
-                            Category.OTHER)
-            return Finding(Verdict.BLOCK, category, "flagged: " + ", ".join(flags))
+    return next((provider for provider in Provider.objects.all()
+                 if provider.usable and provider.kind in adapters.ADAPTERS
+                 and adapters.of(provider).moderates), None)
+
+
+def moderation(request) -> Finding:
+    from apps.ai import adapters
+
+    provider = moderator()
+    if provider is None:
+        return Finding(Verdict.SKIPPED, detail="no provider with moderation has a key "
+                                               "(AI → Providers)")
+    try:
+        flags = adapters.of(provider).moderate(provider, request.prompt, request.images())
+    except adapters.AIError as exc:
+        return Finding(Verdict.ERROR, detail=str(exc)[:200])
+    if request.chat:
+        flags = [name for name in flags if name in CHAT_BLOCKS]
+    if flags:
+        category = next((mapped for prefix, mapped in MODERATION_CATEGORIES
+                         if any(name.startswith(prefix) for name in flags)), Category.OTHER)
+        return Finding(Verdict.BLOCK, category, "flagged: " + ", ".join(flags))
     return Finding(Verdict.ALLOW)
 
 

@@ -62,8 +62,11 @@ def flush(account_id, group, quiet=QUIET) -> str:
 
 
 def deliver(account, chat_id, items, caption):
-    """Where the files go: an edit waiting for photos, voice to text, or the chat."""
-    from . import chat, images, voice
+    """
+    Where the files go: an edit waiting for photos, voice to text, or the
+    chat; each only when the user's provider offers it.
+    """
+    from . import chat, images, offer, voice
 
     draft = state.waiting(account) or {}
     step = draft.get("step")
@@ -71,7 +74,8 @@ def deliver(account, chat_id, items, caption):
     others = [item for item in items if item["kind"] not in ("voice", "audio")]
     photos = [item["file_id"] for item in others if item["kind"] == "photo"]
     if audio:
-        voice.start_transcription(account, chat_id, audio, then_chat=step != "transcribe",
+        then_chat = step != "transcribe" and offer.has(account, offer.CHAT)
+        voice.start_transcription(account, chat_id, audio, then_chat=then_chat,
                                   attachments=others)
         return
     if photos and step in ("edit_photo", "edit_prompt", "image_summary"):

@@ -21,7 +21,9 @@ from apps.core.i18n import gettext as _
 from apps.core.menus import menu_button, nav_row
 from apps.core.services.telegram import esc
 
-from . import catalog
+from apps.ai.models import Use
+
+from . import catalog, files
 from .models import Kind, Status
 
 VOICES = ("marin", "cedar", "coral", "nova", "onyx", "sage", "alloy", "echo")
@@ -108,28 +110,38 @@ def price_line(hold, balance) -> str:
 # Home
 # --------------------------------------------------------------------------
 
-def home_lines(conversation, model, balance) -> list:
-    lines = ["💬 " + esc(_("Just type to chat, or pick an agent made for your task."))]
-    agent = conversation.assistant if conversation is not None and conversation.assistant_id \
-        else None
-    if agent is not None:
-        lines.append(f"{esc(_('Agent'))}: {esc(agent_title(agent))}")
-    if model is not None:
+def home_lines(conversation, model, balance, provider=None, chat=True) -> list:
+    """`provider` is shown when users can choose; the chat lines only when it chats."""
+    lines = []
+    if chat:
+        lines.append("💬 " + esc(_("Just type to chat, or pick an agent made for your task.")))
+        agent = _agent_of(conversation)
+        if agent is not None:
+            lines.append(f"{esc(_('Agent'))}: {esc(agent_title(agent))}")
+    if provider is not None:
+        lines.append(f"{esc(_('AI provider'))}: {esc(provider)}")
+    if chat and model is not None:
         lines.append(f"{esc(_('Model'))}: {esc(model)}")
     lines.append(f"{esc(_('Balance'))}: <b>{coins(balance)}</b>")
     return lines
 
 
-def home_rows(can_continue) -> list:
-    first = [{"text": "➕ " + _("New chat"), "callback_data": "chat:new"}]
-    if can_continue:
-        first.append({"text": "▶️ " + _("Continue"), "callback_data": "chat:"})
-    return [
-        first,
-        [{"text": "🧩 " + _("Agents"), "callback_data": "ag:"},
-         {"text": "🎨 " + _("Images"), "callback_data": "img:"},
-         {"text": "🎙 " + _("Voice"), "callback_data": "voice:"}],
-    ]
+def home_rows(can_continue, functions) -> list:
+    """The tools the user's provider offers, and only those."""
+    rows, tools = [], []
+    if Use.CHAT in functions:
+        first = [{"text": "➕ " + _("New chat"), "callback_data": "chat:new"}]
+        if can_continue:
+            first.append({"text": "▶️ " + _("Continue"), "callback_data": "chat:"})
+        rows.append(first)
+        tools.append({"text": "🧩 " + _("Agents"), "callback_data": "ag:"})
+    if Use.IMAGE in functions:
+        tools.append({"text": "🎨 " + _("Images"), "callback_data": "img:"})
+    if Use.TRANSCRIPTION in functions or Use.SPEECH in functions:
+        tools.append({"text": "🎙 " + _("Voice"), "callback_data": "voice:"})
+    if tools:
+        rows.append(tools)
+    return rows
 
 
 def usage_button():
@@ -583,11 +595,21 @@ def file_problem_text(what, name, model) -> str:
     if what == "cannot_read":
         return _("%(model)s cannot read %(name)s. Choose another model under 🤖 Model.") % {
             "model": model, "name": name}
+    reads = _("The AI reads %(things)s.") % {"things": things_text(files.readable(model))}
+    if what == "provider_cannot_read":
+        return _("Not read with %(provider)s: %(name)s.") % {
+            "provider": model.provider, "name": name} + " " + reads
     if name in ("video", "animation", "video_note", "sticker"):
-        return _("Videos cannot be read yet. The AI reads photos, PDFs, Word, Excel, "
-                 "PowerPoint, text and code files.")
-    return _("%(name)s cannot be read. The AI reads photos, PDFs, Word, Excel, PowerPoint, "
-             "text and code files.") % {"name": name}
+        return _("Videos cannot be read yet.") + " " + reads
+    return _("%(name)s cannot be read.") % {"name": name} + " " + reads
+
+
+def things_text(kinds) -> str:
+    """What the AI reads, in words: photos, PDFs, Word, Excel and PowerPoint files…"""
+    names = {"photos": _("photos"), "pdf": _("PDFs"),
+             "office": _("Word, Excel and PowerPoint files"), "text": _("text and code files"),
+             "voice": _("voice notes")}
+    return ", ".join(names[kind] for kind in kinds if kind in names)
 
 
 def too_many_files_text(limit) -> str:
@@ -831,6 +853,38 @@ def about_button():
 
 
 # --------------------------------------------------------------------------
+# AI provider
+# --------------------------------------------------------------------------
+
+TOOL_ICONS = ((Use.CHAT, "💬"), (Use.IMAGE, "🎨"), (Use.TRANSCRIPTION, "📝"),
+              (Use.SPEECH, "🔊"))
+
+
+def provider_button(provider):
+    return {"text": f"🧠 {_('AI provider')}: {provider}", "callback_data": "ai:"}
+
+
+def provider_text(rows, current) -> str:
+    """rows: [(provider, its functions)]; what each offers, the user's ticked."""
+    from .offer import function_name
+
+    lines = [f"🧠 {_bold(_('AI provider'))}", "",
+             esc(_("The AI company that answers you. Each offers different tools: the menu "
+                   "shows only what yours offers."))]
+    for provider, functions in rows:
+        tools = " · ".join(f"{icon} {esc(function_name(use))}" for use, icon in TOOL_ICONS
+                           if use in functions)
+        lines += ["", ("✓ " if provider == current else "") + _bold(str(provider)), tools]
+    return "\n".join(lines)
+
+
+def provider_keyboard(rows, current):
+    buttons = [[{"text": _tick(provider == current, str(provider)),
+                 "callback_data": f"ai:set:{provider.kind}"}] for provider, _functions in rows]
+    return _inline(buttons + [nav_row("menu:profile")])
+
+
+# --------------------------------------------------------------------------
 # Privacy
 # --------------------------------------------------------------------------
 
@@ -1053,9 +1107,10 @@ def image_caption(job, balance) -> str:
     return f"🎨 #{job.pk}\n" + footer(job.charged, balance)
 
 
-def image_keyboard(job, original, low=False):
-    rows = [[{"text": "🔁 " + _("Again"), "callback_data": f"out:again:{job.pk}"},
-             {"text": "🖌 " + _("Edit this"), "callback_data": f"out:edit:{job.pk}"}]]
+def image_keyboard(job, original, low=False, can_edit=True):
+    rows = [[{"text": "🔁 " + _("Again"), "callback_data": f"out:again:{job.pk}"}]]
+    if can_edit:
+        rows[0].append({"text": "🖌 " + _("Edit this"), "callback_data": f"out:edit:{job.pk}"})
     row = [{"text": "📎 " + _("Original file"), "callback_data": f"out:file:{job.pk}"}] \
         if original else []
     rows.append(row + [details_button(job)])

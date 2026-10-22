@@ -100,7 +100,6 @@ class OverviewAdmin(OwnerOnly, admin.ModelAdmin):
         if request.GET.get("format") == "csv":
             return _csv(start, end, label)
         data = money.overview(start, end)
-        billed, billed_error = money.openai_billed(start, end)
         context = {
             **self.admin_site.each_context(request),
             "title": f"My finances · {label}", "label": label, "chosen": chosen,
@@ -108,8 +107,7 @@ class OverviewAdmin(OwnerOnly, admin.ModelAdmin):
                        for year, month in money.months()],
             "data": data, "days": money.daily(start, end) if chosen != "all" else [],
             "balances": money.provider_balances(), "held": money.held_credits(),
-            "openai_billed": money.micros_usd(billed) if billed is not None else None,
-            "openai_billed_error": billed_error,
+            "billed": money.providers_billed(start, end),
             "eur": {key: money.in_eur(value) for key, value in (
                 ("net", data["income"]["net"]), ("costs", data["costs"]),
                 ("profit", data["profit"]))},

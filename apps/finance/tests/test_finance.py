@@ -122,7 +122,7 @@ class OverviewTests(MoneyTestCase):
         answer.json.return_value = {"data": [
             {"results": [{"amount": {"value": 0.25, "currency": "usd"}}]},
             {"results": [{"amount": {"value": 0.5, "currency": "usd"}}]}], "next_page": None}
-        with mock.patch("apps.ai.clients.requests.get", return_value=answer) as get:
+        with mock.patch("requests.get", return_value=answer) as get:
             page = self.client.get(OVERVIEW)
         self.assertEqual(get.call_args.kwargs["headers"]["Authorization"], "Bearer sk-admin")
         self.assertContains(page, "OpenAI's own figure for this period")
@@ -146,7 +146,7 @@ class AICallTests(TestCase):
         answer.json.return_value = {"status": "completed", "output": [
             {"type": "message", "content": [{"type": "output_text", "text": "ok"}]}],
             "usage": {"input_tokens": 1000, "output_tokens": 200}}
-        with mock.patch("apps.ai.clients.requests.post", return_value=answer):
+        with mock.patch("requests.post", return_value=answer):
             clients.ask(luna, "s", "p", purpose="translation")
             clients.ask(luna, "s", "p", purpose="something_new")
         first, second = AICall.objects.order_by("id")

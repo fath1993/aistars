@@ -11,11 +11,11 @@ read), so the price shown is what is charged.
 """
 
 from apps.ai import clients
-from apps.ai.models import AIModel, Use
+from apps.ai.models import Use
 from apps.billing import ledger
 from apps.core.services import telegram, ui
 
-from . import archive, demo, formatting, jobs, state, texts
+from . import archive, demo, formatting, jobs, offer, state, texts
 from .models import Conversation, Job, Kind
 
 MAX_SECONDS = 20 * 60
@@ -29,12 +29,14 @@ def voice_of(account) -> str:
     return chosen if chosen in texts.VOICES else texts.VOICES[0]
 
 
-def stt_model():
-    return AIModel.default_for(Use.TRANSCRIPTION, jobs.demo())
+def stt_model(account):
+    """The user's provider's voice to text model, or None when it has none."""
+    return offer.model(account, Use.TRANSCRIPTION)
 
 
-def tts_model():
-    return AIModel.default_for(Use.SPEECH, jobs.demo())
+def tts_model(account):
+    """The user's provider's text to speech model, or None when it has none."""
+    return offer.model(account, Use.SPEECH)
 
 
 # --------------------------------------------------------------------------
@@ -42,7 +44,7 @@ def tts_model():
 # --------------------------------------------------------------------------
 
 def show(account, chat_id):
-    stt, tts = stt_model() is not None, tts_model() is not None
+    stt, tts = stt_model(account) is not None, tts_model(account) is not None
     ui.screen(account, chat_id, texts.voice_text(voice_of(account), stt, tts),
               texts.voice_keyboard(stt, tts))
 
@@ -83,9 +85,9 @@ def start_transcription(account, chat_id, audio, then_chat=False, attachments=()
     Voice notes or audio files in (several when sent as one album): their
     text, and with `then_chat` the AI's answer to it, with `attachments`.
     """
-    model = stt_model()
+    model = stt_model(account)
     if model is None:
-        return _notice(chat_id, texts.no_model_text())
+        return _notice(chat_id, offer.not_offered_text(account, Use.TRANSCRIPTION))
     if not all(item["seconds"] for item in audio):
         return _notice(chat_id, texts.no_duration_text())
     if sum(item["seconds"] for item in audio) > MAX_SECONDS:
@@ -184,11 +186,12 @@ def price(model, text) -> int:
 
 def summary(account, chat_id, text, fresh=False):
     """What will be read, in which voice, and its price."""
-    model = tts_model()
+    model = tts_model(account)
     show_screen = ui.fresh_screen if fresh else ui.screen
     if model is None:
         state.stop(account)
-        return show_screen(account, chat_id, telegram.esc(texts.no_model_text()),
+        return show_screen(account, chat_id,
+                           telegram.esc(offer.not_offered_text(account, Use.SPEECH)),
                            texts.cancel_keyboard("voice:"))
     text = text[:TTS_LIMIT]
     cost, balance = price(model, text), ledger.balance(account)
@@ -217,9 +220,9 @@ def start_speech(account, chat_id, text, screen_check=True):
     from apps.safety.models import Result
     from apps.safety.texts import category_text
 
-    model = tts_model()
+    model = tts_model(account)
     if model is None:
-        return _notice(chat_id, texts.no_model_text())
+        return _notice(chat_id, offer.not_offered_text(account, Use.SPEECH))
     text = text[:TTS_LIMIT]
     screening = None
     if screen_check:

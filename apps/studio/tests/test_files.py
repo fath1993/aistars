@@ -82,11 +82,13 @@ class FileTests(StudioTestCase):
     def test_claude_reads_pdfs_and_text_but_not_word(self):
         from apps.ai.models import Provider
 
+        from apps.studio import offer
+
         Provider.objects.filter(kind="anthropic").update(api_key="sk-ant")
-        chat.choose_model(self.account, None, AIModel.objects.get(model_id="claude-haiku-5-5"))
+        offer.choose(self.account, Provider.objects.get(kind="anthropic"))
         self.send_document("doc-1", "cv.docx", mime=DOCX, caption="Improve it")
-        self.assertIn("Claude Haiku 5.5 cannot read cv.docx. Choose another model",
-                      self.last_text())
+        self.assertIn("Not read with Anthropic: cv.docx. The AI reads photos, PDFs, text and "
+                      "code files.", self.last_text())
         self.assertFalse(Job.objects.exists())
 
     def test_a_model_without_eyes_cannot_read_pdfs(self):

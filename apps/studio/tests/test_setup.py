@@ -107,9 +107,14 @@ class DoctorTests(TestCase):
         labels = self.labels()
         self.assertEqual(labels["Using the tools"].detail,
                          "Demo mode (no provider is called), for 1 tester(s) only")
-        self.assertEqual(labels["Chat"].detail,
-                         "GPT-6 Luna (default), GPT-6.1 Sol, GPT-6 Astra, Claude Haiku 5.5, "
-                         "Claude Sonnet 5.5")
+        self.assertEqual(labels["Provider Anthropic"].detail,
+                         "Chat: Claude Haiku 5.5 (default), Claude Sonnet 5.5")
+        self.assertEqual(labels["Provider OpenAI"].detail,
+                         "Chat: GPT-6 Luna (default), GPT-6.1 Sol, GPT-6 Astra · Images: GPT "
+                         "Image 2.5 Flare (default), GPT Image 2.5 Sunburst · Voice to text: GPT "
+                         "Transcribe (default), GPT-4o mini Transcribe · Text to speech: GPT-4o "
+                         "mini TTS (default)")
+        self.assertEqual(labels["Default AI provider"].detail, "openai")
         self.assertEqual(labels["Agents"].detail, "39 on offer in 10 categories")
         self.assertNotIn("Agents without a category", labels)
         self.assertEqual(labels["Archive channel"].status, diagnostics.WARN)
@@ -120,14 +125,23 @@ class DoctorTests(TestCase):
         labels = self.labels()
         self.assertEqual(labels["Using the tools"].detail,
                          "Live, with the providers, open to everyone")
-        for name in ("Chat", "Images", "Voice to text", "Text to speech"):
-            self.assertEqual(labels[name].status, diagnostics.WARN, name)
-            self.assertIn("AI → Providers → OpenAI", labels[name].fix)
+        self.assertEqual(labels["AI providers"].status, diagnostics.WARN)
+        self.assertIn("AI → Providers → OpenAI", labels["AI providers"].fix)
         Provider.objects.filter(kind="openai").update(api_key="sk-test")
         labels = self.labels()
-        self.assertEqual(labels["Images"].detail,
-                         "GPT Image 2.5 Flare (default), GPT Image 2.5 Sunburst")
-        self.assertEqual(labels["Chat"].status, diagnostics.OK)
+        self.assertIn("Images: GPT Image 2.5 Flare (default), GPT Image 2.5 Sunburst",
+                      labels["Provider OpenAI"].detail)
+        self.assertEqual(labels["Provider OpenAI"].status, diagnostics.OK)
+        self.assertNotIn("Provider Anthropic", labels)
+
+    def test_a_default_provider_that_offers_nothing_is_a_warning(self):
+        register(42, tester=True)
+        with runtime.override(DEFAULT_PROVIDER="anthropic"):
+            ControlPanel.objects.update_or_create(singleton=1, defaults={"demo_mode": False})
+            Provider.objects.filter(kind="openai").update(api_key="sk-test")
+            labels = self.labels()
+        self.assertEqual(labels["Default AI provider"].status, diagnostics.WARN)
+        self.assertIn("they get OpenAI", labels["Default AI provider"].detail)
 
     def test_nobody_can_use_them_without_a_tester(self):
         self.assertEqual(self.labels()["Using the tools"].status, diagnostics.WARN)

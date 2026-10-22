@@ -399,8 +399,9 @@ def _studio(report):
 
 def _safety(report):
     section = "Safety"
-    from apps.ai.models import AIModel, Provider, ProviderKind
+    from apps.ai.models import AIModel
     from apps.core.models import ControlPanel
+    from apps.safety.checks import moderator
     from apps.safety.models import BlockedTerm, Policy, Result, Review, Screening
 
     try:
@@ -411,13 +412,13 @@ def _safety(report):
     report.add(OK if words else WARN, "Blocklist", f"{words} word(s)",
                "" if words else "Safety → Blocked words: add the plainest ones.", section)
 
-    openai = Provider.objects.filter(kind=ProviderKind.OPENAI).first()
-    if openai is not None and openai.usable:
-        report.add(OK, "OpenAI Moderation", "on", "", section)
+    checker = moderator()
+    if checker is not None:
+        report.add(OK, "Moderation", f"on ({checker})", "", section)
     else:
-        report.add(WARN, "OpenAI Moderation", "off: no OpenAI key, only the blocklist reads "
-                   "chat messages", "AI → Providers → OpenAI: add the key (Moderation is "
-                   "free).", section)
+        report.add(WARN, "Moderation", "off: no provider with moderation has a key, only the "
+                   "blocklist reads chat messages", "AI → Providers → OpenAI: add the key "
+                   "(its Moderation is free).", section)
 
     judge = AIModel.safety_default()
     live = not ControlPanel.get().demo_mode
