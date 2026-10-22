@@ -287,7 +287,7 @@ class DiagnosticsTests(TestCase):
         labels = {check.label: check for check in diagnostics.run().checks}
         self.assertEqual(labels["Packs on sale"].detail, "3")
         self.assertEqual(labels["Support contact"].status, diagnostics.WARN)
-        self.assertIn("a $1.00 cost is 🪙 108", labels["Pricing"].detail)
+        self.assertIn("a $1.00 cost is 💎 108", labels["Pricing"].detail)
 
         Pack.objects.update(active=False)
         CreditRequest.objects.create(account=Account.objects.create(telegram_user_id=9),

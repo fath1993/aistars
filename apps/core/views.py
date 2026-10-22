@@ -9,6 +9,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from apps.billing import bot as billing_bot
+from apps.billing import services as billing_services
 from apps.studio import archive
 from apps.studio import bot as studio_bot
 
@@ -248,9 +249,10 @@ def _register(account, message):
     activity.info(LogCategory.ACCOUNT, "registered",
                   f"{account} registered from {country}", account=account,
                   detail={"country": country})
+    gift = billing_services.welcome(account)
     # The country is known now, and with it maybe a different language.
     with languages.activate_for(account):
-        telegram.send_message(chat_id, menus.registered_text(),
+        telegram.send_message(chat_id, menus.registered_text(gift),
                               reply_markup=menus.remove_keyboard())
         payload = cache.get(_start_key(account))
         cache.delete(_start_key(account))

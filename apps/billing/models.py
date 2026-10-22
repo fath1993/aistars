@@ -9,6 +9,8 @@ balance_after of their newest row.
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
+from .pricing import icon
+
 
 class Pack(models.Model):
     """A credit pack users can buy with Stars."""
@@ -26,7 +28,7 @@ class Pack(models.Model):
         ordering = ("sort_order", "stars")
 
     def __str__(self):
-        return f"🪙 {self.credits} = ⭐ {self.stars}"
+        return f"{icon()} {self.credits} = ⭐ {self.stars}"
 
 
 class PaymentStatus(models.TextChoices):
@@ -83,7 +85,7 @@ class CreditRequest(models.Model):
         ordering = ("-created_at",)
 
     def __str__(self):
-        return f"{self.account}: 🪙 {self.amount} ({self.get_status_display()})"
+        return f"{self.account}: {icon()} {self.amount} ({self.get_status_display()})"
 
 
 class EntryKind(models.TextChoices):
@@ -91,6 +93,7 @@ class EntryKind(models.TextChoices):
     MANUAL_GRANT = "manual_grant", "Credit request approved"
     ADMIN_ADJUST = "admin_adjust", "Admin adjustment"
     REFUND = "refund", "Payment refunded"
+    WELCOME = "welcome", "Welcome credits"
     # A request (a chat answer, an image, a voice note): the most it can cost
     # is held when it starts (hold, −most); when it is done, what it really
     # cost is charged and the rest of the hold goes back (charge, +the rest);

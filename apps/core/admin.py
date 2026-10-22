@@ -3,6 +3,7 @@ from django.contrib import admin
 from django.contrib.admin.helpers import ActionForm
 
 from apps.ai.models import AIModel
+from apps.billing.pricing import icon
 
 from . import activity, i18n, languages, runtime, translation
 from .models import (
@@ -84,7 +85,7 @@ class AccountAdmin(admin.ModelAdmin):
 
     @admin.display(description="credits", ordering="balance")
     def credits(self, obj):
-        return f"🪙 {obj.balance or 0}"
+        return f"{icon()} {obj.balance or 0}"
 
     def changelist_view(self, request, extra_context=None):
         # Loaded once per page, not once per row.
@@ -121,7 +122,7 @@ class AccountAdmin(admin.ModelAdmin):
             except ledger.InsufficientCredits as exc:
                 self.message_user(request, f"{account}: {exc}", messages.ERROR)
                 continue
-            self.message_user(request, f"{account}: {amount:+d}, balance 🪙 {balance}.")
+            self.message_user(request, f"{account}: {amount:+d}, balance {icon()} {balance}.")
 
     def _set_status(self, request, queryset, status, event):
         # Listed before the update: a changelist filtered by status would

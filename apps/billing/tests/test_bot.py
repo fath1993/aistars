@@ -67,26 +67,26 @@ class CreditsScreenTests(BotTestCase):
         ledger.post(self.account, EntryKind.PURCHASE, 120)
         post_update(callback_update("credits:", self.panel))
         edit = self.tg.last("editMessageText")
-        self.assertIn("Balance: <b>🪙 120</b>", edit["text"])
+        self.assertIn("Balance: <b>💎 120</b>", edit["text"])
         self.assertEqual(keyboard_callbacks(edit), [
             "credits:buy", "credits:statement:0", "credits:request", "menu:home", "menu:home"])
 
     def test_the_credits_command(self):
         post_update(message_update("/credits"))
-        self.assertIn("Balance: <b>🪙 0</b>", self.tg.last("sendMessage")["text"])
+        self.assertIn("Balance: <b>💎 0</b>", self.tg.last("sendMessage")["text"])
 
     def test_the_packs_on_sale(self):
         Pack.objects.filter(stars=1000).update(active=False)
         post_update(callback_update("credits:buy", self.panel))
         edit = self.tg.last("editMessageText")
         labels = [row[0]["text"] for row in json.loads(edit["reply_markup"])["inline_keyboard"]]
-        self.assertEqual(labels, ["🪙 100 = ⭐ 100", "🪙 300 = ⭐ 300", "‹ Back"])
+        self.assertEqual(labels, ["💎 100 = ⭐ 100", "💎 300 = ⭐ 300", "‹ Back"])
 
     def test_tapping_a_pack_sends_a_stars_invoice(self):
         post_update(callback_update(f"credits:pack:{self.pack.pk}", self.panel))
         invoice = self.tg.last("sendInvoice")
         self.assertEqual(invoice["currency"], "XTR")
-        self.assertEqual(json.loads(invoice["prices"]), [{"label": "🪙 100 = ⭐ 100",
+        self.assertEqual(json.loads(invoice["prices"]), [{"label": "💎 100 = ⭐ 100",
                                                           "amount": 100}])
         self.assertEqual(invoice["payload"], f"pack:{self.pack.pk}:100:100")
         self.assertNotIn("provider_token", invoice)
@@ -148,7 +148,7 @@ class PaymentTests(BotTestCase):
         self.assertIn("Payment received", receipt["text"])
         self.assertIn("<code>charge-1</code>", receipt["text"])
         self.assertEqual(keyboard_callbacks(receipt), ["menu:new"])
-        self.assertIn("Balance: <b>🪙 100</b>", self.tg.last("sendMessage")["text"])
+        self.assertIn("Balance: <b>💎 100</b>", self.tg.last("sendMessage")["text"])
 
     def test_the_same_payment_twice_counts_once(self):
         post_update(paid_update(self.pack))
@@ -188,12 +188,12 @@ class StatementTests(BotTestCase):
         post_update(callback_update("credits:statement:0", self.panel))
         edit = self.tg.last("editMessageText")
         self.assertIn("Adjusted by support", edit["text"])
-        self.assertIn("<b>−1</b> → 🪙 390", edit["text"])
+        self.assertIn("<b>−1</b> → 💎 390", edit["text"])
         self.assertEqual(keyboard_callbacks(edit),
                          ["credits:statement:1", "credits:", "menu:home"])
         post_update(callback_update("credits:statement:1", self.panel))
         edit = self.tg.last("editMessageText")
-        self.assertIn("<b>+300</b> → 🪙 400", edit["text"])
+        self.assertIn("<b>+300</b> → 💎 400", edit["text"])
         self.assertIn("Bought credits", edit["text"])
         self.assertEqual(keyboard_callbacks(edit),
                          ["credits:statement:0", "credits:", "menu:home"])
@@ -221,7 +221,7 @@ class CreditRequestTests(BotTestCase):
         post_update(message_update("please"))
         notice = [p for p in self.sent("sendMessage") if p["chat_id"] == 999][0]
         self.assertIn("New credit request", notice["text"])
-        self.assertIn("🪙 50", notice["text"])
+        self.assertIn("💎 50", notice["text"])
         self.assertIn("/admin/billing/creditrequest/", notice["text"])
 
     def test_one_request_at_a_time(self):

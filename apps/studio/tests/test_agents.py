@@ -65,7 +65,7 @@ class CatalogTests(StudioTestCase):
         self.assertIn("🧩 Agents › <b>⚖️ Law</b>", text)
         self.assertIn("🧑‍⚖️ <b>Lawyer</b>", text)
         self.assertIn("Try asking:\n• My employer hasn't paid my salary", text)
-        self.assertIn("Model: <b>GPT-6.1 Sol</b> · An everyday answer: ~🪙 2", text)
+        self.assertIn("Model: <b>GPT-6.1 Sol</b> · An everyday answer: ~💎 2", text)
         buttons = self.buttons()
         self.assertEqual(buttons[:4], ["ag:start:lawyer", "ag:try:lawyer:0", "ag:try:lawyer:1",
                                        "ag:try:lawyer:2"])

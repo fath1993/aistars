@@ -179,7 +179,7 @@ class FileTests(StudioTestCase):
         self.tap("chat:")
         text = self.last_text()
         self.assertIn("📎 Read again with each message (cheaper while you keep chatting):", text)
-        self.assertIn("• 📄 lease.pdf · under 🪙 1", text)
+        self.assertIn("• 📄 lease.pdf · under 💎 1", text)
         message = Message.objects.get(role="user")
         self.assertIn(f"chat:close:{message.pk}:0", self.buttons())
 
@@ -190,7 +190,7 @@ class FileTests(StudioTestCase):
             {"file_id": "pdf-9", "name": "big.pdf", "mime": "application/pdf",
              "size": 2_000_000, "pages": 30}])
         self.tap("chat:")
-        self.assertIn("• 📄 big.pdf · up to 🪙", self.last_text())
+        self.assertIn("• 📄 big.pdf · up to 💎", self.last_text())
 
     def test_closing_a_file(self):
         self.send_document("pdf-1", "lease.pdf", caption="Read this")

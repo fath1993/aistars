@@ -7,6 +7,7 @@ from django.http import HttpResponse
 
 from . import ledger, services
 from .models import CreditRequest, LedgerEntry, Pack, Payment, PaymentStatus, RequestStatus
+from .pricing import icon
 
 
 @admin.register(Pack)
@@ -111,7 +112,7 @@ class CreditRequestAdmin(admin.ModelAdmin):
             balance = services.approve(credit_request, amount, request.user.get_username())
             with languages.activate_for(credit_request.account):
                 self._tell_user(credit_request, texts.request_approved_text(amount, balance))
-            self.message_user(request, f"Granted 🪙 {amount} to {credit_request.account}.")
+            self.message_user(request, f"Granted {icon()} {amount} to {credit_request.account}.")
 
     @admin.action(description="Reject")
     def reject(self, request, queryset):

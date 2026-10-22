@@ -56,7 +56,7 @@
   </div>
   <div class="fin-card">
     <div class="small">Credits users still hold</div>
-    <div class="big">🪙 {{ held.credits|intcomma }}</div>
+    <div class="big">{{ credit_icon }} {{ held.credits|intcomma }}</div>
     <div class="small">Worth ${{ held.paid|floatformat:2 }} at your Star value; using them all
       would cost you at most ${{ held.cost_at_most|floatformat:2 }} at the providers.</div>
   </div>

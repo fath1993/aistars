@@ -132,7 +132,7 @@ class TestSuiteIntegrityTests(SimpleTestCase):
 
     # Raise it as tests are added; lower it only when a feature is removed
     # together with its tests.
-    MINIMUM_TESTS = 620
+    MINIMUM_TESTS = 622
 
     def test_the_suite_is_not_shrinking(self):
         import unittest

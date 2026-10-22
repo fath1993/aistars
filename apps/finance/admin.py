@@ -15,6 +15,8 @@ from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
 
+from apps.billing.pricing import icon
+
 from . import money
 from .models import Bill, Overview, StarsAccount
 
@@ -112,6 +114,7 @@ class OverviewAdmin(OwnerOnly, admin.ModelAdmin):
                 ("net", data["income"]["net"]), ("costs", data["costs"]),
                 ("profit", data["profit"]))},
             "eur_rate": money.eur_rate(), "star_value": money.star_value(),
+            "credit_icon": icon(),
         }
         return TemplateResponse(request, "admin/finance/overview.html", context)
 

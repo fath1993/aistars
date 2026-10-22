@@ -23,7 +23,7 @@ class UsagePageTests(StudioTestCase):
         self.tap("use:")
         text = self.last_text()
         self.assertIn("📊 <b>Usage</b>", text)
-        self.assertIn("Today: <b>🪙 0</b> · Requests: 0", text)
+        self.assertIn("Today: <b>💎 0</b> · Requests: 0", text)
         self.assertIn("Daily limit: none", text)
         self.assertIn("No requests yet.", text)
         self.assertEqual(self.buttons(), ["use:last:0", "use:limit", "credits:", "menu:home",
@@ -42,12 +42,12 @@ class UsagePageTests(StudioTestCase):
                            status=Status.FAILED, hold=9)
         self.say("/usage")
         text = self.last_text()
-        self.assertIn("Today: <b>🪙 9</b> · Requests: 3", text)
-        self.assertIn("7 days: <b>🪙 9</b> · Requests: 3", text)
-        self.assertIn("30 days: <b>🪙 13</b> · Requests: 4", text)
-        self.assertIn("<b>Last 30 days by tool</b>\n🎨 Images: 🪙 7\n💬 Chat: 🪙 6", text)
-        self.assertIn("<b>By agent</b>\n🤖 General assistant: 🪙 5\n👨‍🍳 Chef: 🪙 1", text)
-        self.assertIn("<b>By model</b>\nGPT-6 Luna: 🪙 13", text)
+        self.assertIn("Today: <b>💎 9</b> · Requests: 3", text)
+        self.assertIn("7 days: <b>💎 9</b> · Requests: 3", text)
+        self.assertIn("30 days: <b>💎 13</b> · Requests: 4", text)
+        self.assertIn("<b>Last 30 days by tool</b>\n🎨 Images: 💎 7\n💬 Chat: 💎 6", text)
+        self.assertIn("<b>By agent</b>\n🤖 General assistant: 💎 5\n👨‍🍳 Chef: 💎 1", text)
+        self.assertIn("<b>By model</b>\nGPT-6 Luna: 💎 13", text)
 
     def test_no_agent_used_shows_no_agent_lines(self):
         self.say("Hi")
@@ -68,7 +68,7 @@ class UsagePageTests(StudioTestCase):
         text = self.last_text()
         self.assertIn("🧾 <b>Last requests</b>", text)
         self.assertIn("💬 Chat answer · GPT-6 Luna · <b>nothing charged</b>", text)
-        self.assertIn("💬 Chat answer · GPT-6 Luna · <b>🪙 1</b>", text)
+        self.assertIn("💬 Chat answer · GPT-6 Luna · <b>💎 1</b>", text)
         self.assertEqual(self.buttons(), ["use:", "menu:home"])
 
     def test_last_requests_have_pages(self):
@@ -86,7 +86,7 @@ class UsagePageTests(StudioTestCase):
         Job.objects.create(account=register(77), kind="chat", model=luna(), chat_id=77,
                            status=Status.DONE, charged=50)
         self.tap("use:")
-        self.assertIn("30 days: <b>🪙 0</b>", self.last_text())
+        self.assertIn("30 days: <b>💎 0</b>", self.last_text())
 
 
 class LimitTests(StudioTestCase):
@@ -95,13 +95,13 @@ class LimitTests(StudioTestCase):
         self.assertIn("The most your requests may cost in a day", self.last_text())
         self.assertEqual(self.buttons()[:3], ["use:setlimit:0", "use:setlimit:20",
                                               "use:setlimit:50"])
-        self.assertEqual(self.tap("use:setlimit:50"), "🎯 🪙 50")
-        self.assertIn("Daily limit: 🪙 50 · used today: 🪙 0", self.last_text())
+        self.assertEqual(self.tap("use:setlimit:50"), "🎯 💎 50")
+        self.assertIn("Daily limit: 💎 50 · used today: 💎 0", self.last_text())
         from apps.studio.chat import profile
 
         self.assertEqual(profile(self.account).daily_limit, 50)
         self.tap("use:limit")
-        self.assertIn("✓ 🪙 50", self.button_texts())
+        self.assertIn("✓ 💎 50", self.button_texts())
         self.assertEqual(self.tap("use:setlimit:0"), "🎯 No limit")
         self.assertIsNone(profile(self.account).daily_limit)
 
@@ -143,7 +143,7 @@ class ResultDetailsTests(StudioTestCase):
         details = self.tap(f"out:cost:{job.pk}", message_id=1)
         self.assertTrue(details.startswith(f"🎨 Image #{job.pk}\nGPT Image 2.5 Flare · "))
         self.assertIn("Tokens:", details)
-        self.assertIn(f"charged 🪙 {job.charged}", details)
+        self.assertIn(f"charged 💎 {job.charged}", details)
 
     def test_a_voice_note_heard(self):
         self.tap("voice:stt")
@@ -166,4 +166,4 @@ class ResultDetailsTests(StudioTestCase):
     def test_a_request_being_made(self):
         job = Job.objects.create(account=self.account, kind="chat", model=luna(), chat_id=42,
                                  status=Status.RUNNING, hold=4)
-        self.assertIn("Being made: 🪙 4 held.", self.tap(f"out:cost:{job.pk}", message_id=1))
+        self.assertIn("Being made: 💎 4 held.", self.tap(f"out:cost:{job.pk}", message_id=1))

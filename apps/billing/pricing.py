@@ -14,6 +14,11 @@ from decimal import Decimal
 from apps.core import runtime
 
 
+def icon() -> str:
+    """The credit icon (Runtime setting), before every amount of credits."""
+    return str(runtime.get("CREDIT_ICON") or "💎").strip()
+
+
 def margin_percent() -> Decimal:
     return Decimal(str(runtime.get("PROFIT_MARGIN_PERCENT")))
 
@@ -42,7 +47,7 @@ def credits_for(cost_usd, margin=None) -> int:
 
 
 def credits_exact(cost_micros, model=None) -> Decimal:
-    """Credits before rounding up: to say "less than 🪙 1" of a small part of a price."""
+    """Credits before rounding up: to say "less than 💎 1" of a small part of a price."""
     margin = model.margin if model is not None and model.margin is not None else None
     margin = margin_percent() if margin is None else Decimal(str(margin))
     return Decimal(int(cost_micros)) / 1_000_000 / star_value_usd() * (1 + margin / 100)

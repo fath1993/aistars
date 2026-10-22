@@ -44,7 +44,7 @@ class BillingAdminTests(TestCase):
 
     def test_the_account_list_shows_credits(self):
         pay(self.account, self.pack)
-        self.assertContains(self.client.get("/admin/core/account/"), "🪙 100")
+        self.assertContains(self.client.get("/admin/core/account/"), "💎 100")
 
     def test_the_ledger_cannot_be_changed_or_deleted(self):
         pay(self.account, self.pack)

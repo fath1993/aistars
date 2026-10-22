@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from django.db import connection
 from django.utils import timezone
 
+from apps.billing.pricing import icon
+
 from . import runtime
 
 # A delivery error older than this, with nothing queued behind it, is treated
@@ -374,7 +376,7 @@ def _billing(report):
 
     report.add(OK, "Pricing",
                f"{pricing.margin_percent()}% margin, one Star = ${pricing.star_value_usd()}: "
-               f"a $1.00 cost is 🪙 {pricing.credits_for(1)}", "", section)
+               f"a $1.00 cost is {icon()} {pricing.credits_for(1)}", "", section)
 
     waiting = CreditRequest.objects.filter(status=RequestStatus.PENDING).count()
     if waiting:

@@ -82,6 +82,12 @@ REGISTRY = (
     Spec("STAR_VALUE_USD", "billing", "Value of one Star (USD)", kind="float",
          default=0.013,
          help="What you receive per Telegram Star. One credit is one Star."),
+    Spec("CREDIT_ICON", "billing", "Credit icon", default="💎",
+         help="Shown before every amount of credits in the bot (💎 12) and the admin. Not ⭐: "
+              "users pay with Telegram Stars, and the two would be mixed up."),
+    Spec("WELCOME_CREDITS", "billing", "Credits for a new user", kind="int", default=10,
+         help="Given once when someone registers (shares their phone number), once per "
+              "number too. 0: none."),
     Spec("FINANCE_EUR_RATE", "billing", "One EUR in USD", kind="float", default=1.15,
          help="My finances counts in USD; bills in EUR are converted at this rate, and totals "
               "are also shown in EUR. Update it now and then."),
@@ -176,6 +182,7 @@ def normalise(key: str, value: str) -> str:
 RANGES = {
     "CHAT_MEMORY_TOKENS": (1000, 200_000),
     "TELEGRAM_UPDATES_KEEP_DAYS": (0, 3650),
+    "WELCOME_CREDITS": (0, 100_000),
     "CHAT_FILE_MESSAGES": (1, 50),
     "CHAT_MAX_MESSAGE_CHARS": (100, 100_000),
     "JOBS_PER_USER": (1, 10),
@@ -214,6 +221,8 @@ def validate(key: str, value: str) -> str:
         low, high = RANGES[key]
         if not value.isdigit() or not low <= int(value) <= high:
             return f"A whole number from {low} to {high}."
+    if key == "CREDIT_ICON" and not 1 <= len(value.strip()) <= 8:
+        return "One emoji, e.g. 💎."
     if key in ("FINANCE_EUR_RATE", "PROVIDER_LOW_BALANCE_USD"):
         try:
             number = float(value)

@@ -7,7 +7,7 @@ import json
 from django.test import TestCase
 from django.utils import translation
 
-from apps.core import menus, registration
+from apps.core import menus, runtime, registration
 from apps.core.models import Account, ActivityLog, Country
 
 from .helpers import (
@@ -130,10 +130,35 @@ class UnregisteredTests(TestCase):
     def test_registering_removes_the_phone_button_and_shows_the_panel(self):
         post_update(contact_update(BRITISH))
         sends = [payload for method, payload in self.tg.calls if method == "sendMessage"]
-        self.assertEqual(sends[0]["text"], menus.registered_text())
+        self.assertEqual(sends[0]["text"], menus.registered_text(10))
+        self.assertIn("🎁 A welcome gift: 💎 10 to try everything.", sends[0]["text"])
         self.assertEqual(markup(sends[0]), {"remove_keyboard": True})
         self.assertEqual(sends[-1]["text"], menus.home_text())
         self.assertIsNotNone(Account.objects.get(telegram_user_id=42).ui_message_id)
+
+    def test_a_new_user_gets_the_welcome_credits_once_per_number(self):
+        from apps.billing import ledger
+        from apps.billing.models import EntryKind, LedgerEntry
+
+        post_update(contact_update(BRITISH))
+        first = Account.objects.get(telegram_user_id=42)
+        self.assertEqual(ledger.balance(first), 10)
+        self.assertEqual(LedgerEntry.objects.get(account=first).kind, EntryKind.WELCOME)
+        # A second Telegram account with the same number: no second gift.
+        post_update(contact_update(BRITISH, user_id=77))
+        second = Account.objects.get(telegram_user_id=77)
+        self.assertTrue(second.is_registered)
+        self.assertEqual(ledger.balance(second), 0)
+        sent = [payload["text"] for method, payload in self.tg.calls
+                if method == "sendMessage" and payload["chat_id"] == 77]
+        self.assertIn(menus.registered_text(), sent)
+
+    @runtime.override(WELCOME_CREDITS=0)
+    def test_no_gift_when_the_owner_says_so(self):
+        from apps.billing import ledger
+
+        post_update(contact_update(BRITISH))
+        self.assertEqual(ledger.balance(Account.objects.get(telegram_user_id=42)), 0)
 
     def test_the_panel_speaks_the_countrys_default_language(self):
         # Telegram says English; Romania's default is Romanian, and it wins.

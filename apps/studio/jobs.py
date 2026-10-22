@@ -172,8 +172,9 @@ def done(job, cost_micros, tokens_in=0, tokens_out=0, cached=0) -> int:
     if updated:
         job.status, job.cost_micros, job.charged = Status.DONE, cost_micros, credits
         job.input_tokens, job.output_tokens, job.cached_tokens = tokens_in, tokens_out, cached
+        icon = pricing.icon()
         activity.info(LogCategory.STUDIO, f"{job.kind}_done",
-                      f"#{job.pk} {job.account}: 🪙 {credits} of 🪙 {job.hold} held "
+                      f"#{job.pk} {job.account}: {icon} {credits} of {icon} {job.hold} held "
                       f"(${cost_micros / 1e6:.4f})", account=job.account,
                       detail={"job": job.pk, "charged": credits, "hold": job.hold})
     return ledger.balance(job.account)

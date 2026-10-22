@@ -40,7 +40,7 @@ class CreateTests(StudioTestCase):
         self.assertIn("Shape: ⬜ Square · Quality: Good", text)
         hold = images.estimate(AIModel.objects.get(model_id="gpt-image-2.5-flare"),
                                "A red fox in the snow at sunrise", "1024x1024", "medium", [])
-        self.assertIn("Price: <b>at most 🪙 ", text)
+        self.assertIn("Price: <b>at most 💎 ", text)
         self.assertIn("You pay what it really costs, never more.", text)
         self.assertIn("img:go", self.buttons())
         self.assertGreater(hold, 0)
@@ -64,14 +64,14 @@ class CreateTests(StudioTestCase):
         body = self.openai.sent("images/generations")[0]["json"]
         self.assertEqual((body["model"], body["size"], body["quality"]),
                          ("gpt-image-2.5-flare", "1024x1024", "high"))
-        # 100 x $5 + 1000 x $8 + 1056 x $30 per 1M = $0.04018: 🪙 5 at a 40% margin.
+        # 100 x $5 + 1000 x $8 + 1056 x $30 per 1M = $0.04018: 💎 5 at a 40% margin.
         self.assertEqual((job.cost_micros, job.charged), (40_180, 5))
         self.assertLess(job.charged, job.hold)
         self.assertEqual(self.balance(), 495)
         photo = self.tg.last("sendPhoto")
         self.assertEqual(photo["chat_id"], 42)
         self.assertIn(f"🎨 #{job.pk}", photo["caption"])
-        self.assertIn("🪙 5 · Balance 🪙 495", photo["caption"])
+        self.assertIn("💎 5 · Balance 💎 495", photo["caption"])
         self.assertEqual(self.buttons(photo), [f"out:again:{job.pk}", f"out:edit:{job.pk}",
                                                f"out:cost:{job.pk}", "menu:new"])
         self.assertTrue(job.result_file_id)

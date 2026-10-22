@@ -44,7 +44,7 @@ def home_rows(account) -> list:
 
 
 def account_buttons(account) -> list:
-    """Next to 🪙 Credits on the home panel."""
+    """Next to 💎 Credits on the home panel."""
     return [texts.usage_button()] if jobs.may_use(account) else []
 
 

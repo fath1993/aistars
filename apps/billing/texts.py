@@ -1,7 +1,7 @@
 """
 Every word of the credits screens, in English inside `_()`; translated by AI
 like the rest of the bot (apps/core/i18n.py). No number agreement: amounts
-appear as "🪙 120" or after a label, never as "120 credits".
+appear as "💎 120" or after a label, never as "120 credits".
 """
 
 import json
@@ -14,7 +14,6 @@ from apps.core.services.telegram import esc
 
 from .models import HOLD_KINDS, EntryKind
 
-COIN = "🪙"
 STAR = "⭐"
 
 
@@ -26,8 +25,14 @@ def _inline(rows):
     return json.dumps({"inline_keyboard": rows})
 
 
+def coin() -> str:
+    from .pricing import icon
+
+    return icon()
+
+
 def coins(amount) -> str:
-    return f"{COIN} {amount}"
+    return f"{coin()} {amount}"
 
 
 def signed(amount) -> str:
@@ -39,7 +44,7 @@ def signed(amount) -> str:
 # --------------------------------------------------------------------------
 
 def credits_button():
-    return {"text": f"{COIN} " + _("Credits"), "callback_data": "credits:"}
+    return {"text": f"{coin()} " + _("Credits"), "callback_data": "credits:"}
 
 
 def credits_text(balance) -> str:
@@ -138,12 +143,13 @@ def entry_label(entry) -> str:
         EntryKind.MANUAL_GRANT: _("Credit request approved"),
         EntryKind.ADMIN_ADJUST: _("Adjusted by support"),
         EntryKind.REFUND: _("Payment refunded"),
+        EntryKind.WELCOME: _("Welcome gift"),
     }.get(entry.kind, entry.kind)
 
 
 def entry_amount(entry) -> str:
     """
-    '+100 → 🪙 100'. A done request shows what it cost (the hold, less what
+    '+100 → 💎 100'. A done request shows what it cost (the hold, less what
     came back); one not done shows 0: its hold came back whole.
     """
     if entry.kind == EntryKind.CHARGE:

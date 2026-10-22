@@ -13,6 +13,7 @@ from apps.core.services import telegram, ui
 
 from . import ledger, services, texts
 from .models import Pack
+from .pricing import icon
 
 INPUT_TTL = 15 * 60   # an unanswered "how many credits?" expires
 
@@ -66,7 +67,7 @@ def _tell_admin(request):
         "<b>New credit request</b>",
         f"From: {telegram.esc(account.display_name or account.username or account.telegram_user_id)}"
         f" ({telegram.esc(account.phone or 'no phone')}, {telegram.esc(account.country or '—')})",
-        f"Amount: 🪙 {request.amount}",
+        f"Amount: {icon()} {request.amount}",
         f"Note: {telegram.esc(request.note or '—')}",
     ]
     if base:

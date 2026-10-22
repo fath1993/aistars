@@ -50,6 +50,24 @@ touches one, update it in the same change.
 
 ## Changelog
 
+### 2026-10-22 — v0.8.0 — A welcome gift of 💎 10, and 💎 for credits
+
+The owner wants every new user to get 10 credits, and does not like the
+credit icon (🪙, which looks like a moon on some phones); offered ✨, 💎, ⚡
+and 🟡 (not ⭐: users pay with Telegram Stars), he chose 💎.
+- **Credits for a new user** (Runtime settings, 10; 0: none): given when
+  someone registers (shares their number), as a ledger entry of a new kind,
+  Welcome credits (statement: "Welcome gift"); once per account and once per
+  phone number, so a second Telegram account on the same number gets none.
+  The registration message says "🎁 A welcome gift: 💎 10 to try
+  everything." Logged as welcome_credits. Accounts registered before keep
+  their balance (Adjust credit gives credits by hand).
+- **Credit icon** (Runtime settings, 💎): every amount of credits, in the bot
+  (answers, prices, buttons, Usage, Credits) and in the admin and logs, now
+  takes it from one place (`pricing.icon()`), so it can be changed without a
+  deploy.
+- Tests: the gift once per number, none at 0; the icon throughout. 622 tests.
+
 ### 2026-10-22 — v0.7.0 — My finances: money in, costs, providers, invoices
 
 The owner could not see easily what the bot costs: as the one who pays for

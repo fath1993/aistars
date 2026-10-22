@@ -92,7 +92,7 @@ class OverviewTests(MoneyTestCase):
         page = self.client.get(OVERVIEW)
         self.assertEqual(page.status_code, 200)
         text = page.content.decode()
-        for expected in ("$13.00", "$6.75", "$6.25", "🪙 300", "$19.40", "Chat answers",
+        for expected in ("$13.00", "$6.75", "$6.25", "💎 300", "$19.40", "Chat answers",
                          "Safety judge", "Hetzner", "5.00 EUR", "€11.30", "€5.43"):
             self.assertIn(expected, text, expected)
 

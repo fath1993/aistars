@@ -40,7 +40,7 @@ class LedgerTests(JobTestCase):
     def test_hold_then_charge_returns_the_rest(self):
         job = self.job(hold=10)
         self.assertEqual(ledger.balance(self.account), 90)
-        self.assertEqual(jobs.done(job, 20_000), 97)   # $0.02 → 🪙 3 of the 🪙 10 held
+        self.assertEqual(jobs.done(job, 20_000), 97)   # $0.02 → 💎 3 of the 💎 10 held
         job.refresh_from_db()
         self.assertEqual((job.status, job.charged, job.cost_micros), (Status.DONE, 3, 20_000))
         self.assertEqual(LedgerEntry.objects.get(kind=EntryKind.CHARGE).amount, 7)
@@ -93,10 +93,10 @@ class StatementTests(JobTestCase):
         failed = self.job(hold=4)
         jobs.failed(failed, "x")
         self.assertEqual(self.lines(), [
-            (f"Chat answer #{failed.pk} · not done, nothing charged", "<b>0</b> → 🪙 92"),
-            (f"Chat answer #{done.pk}", "<b>−3</b> → 🪙 92"),
-            (f"Chat answer #{running.pk} · in progress, held", "<b>−5</b> → 🪙 95"),
-            ("Bought credits", "<b>+100</b> → 🪙 100"),
+            (f"Chat answer #{failed.pk} · not done, nothing charged", "<b>0</b> → 💎 92"),
+            (f"Chat answer #{done.pk}", "<b>−3</b> → 💎 92"),
+            (f"Chat answer #{running.pk} · in progress, held", "<b>−5</b> → 💎 95"),
+            ("Bought credits", "<b>+100</b> → 💎 100"),
         ])
 
     def test_paging_counts_the_lines_shown(self):

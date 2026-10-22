@@ -162,8 +162,14 @@ def register_first_text() -> str:
     return _("Share your phone number first.")
 
 
-def registered_text() -> str:
-    return "✅ " + _("Thank you, you are registered.")
+def registered_text(gift=0) -> str:
+    text = "✅ " + _("Thank you, you are registered.")
+    if gift:
+        from apps.billing.texts import coins
+
+        text += "\n🎁 " + _("A welcome gift: %(credits)s to try everything.") % {
+            "credits": coins(gift)}
+    return text
 
 
 def region_text() -> str:

@@ -2,7 +2,7 @@
 Every word of the AI tools, in English inside `_()`; translated by AI like
 the rest of the bot (apps/core/i18n.py). Database texts users see (model
 taglines, assistants) go through catalog.tr. No number agreement: amounts
-appear as "🪙 3" or after a label.
+appear as "💎 3" or after a label.
 
 Callback data: panel screens use chat:, ag: (agents), img:, voice: and use:
 (usage). Buttons on messages that are not the panel (an answer, an image, a
@@ -15,7 +15,7 @@ import math
 
 from django.utils import formats, timezone
 
-from apps.billing.texts import coins
+from apps.billing.texts import coin, coins
 from apps.core import runtime
 from apps.core.i18n import gettext as _
 from apps.core.menus import menu_button, nav_row
@@ -202,7 +202,7 @@ def file_label(item) -> str:
 
 
 def price_hint(exact) -> str:
-    """A part of a price: "up to 🪙 12", or "under 🪙 1"."""
+    """A part of a price: "up to 💎 12", or "under 💎 1"."""
     if exact < 1:
         return _("under %(price)s") % {"price": coins(1)}
     return _("up to %(price)s") % {"price": coins(math.ceil(exact))}
@@ -504,7 +504,7 @@ def no_photos_text(model) -> str:
 
 def not_enough_text(hold, balance) -> str:
     return "\n".join([
-        "🪙 " + _bold(_("Not enough credits")),
+        f"{coin()} " + _bold(_("Not enough credits")),
         "",
         esc(_("This can cost up to %(price)s, and your balance is %(balance)s.") % {
             "price": coins(hold), "balance": coins(balance)}),

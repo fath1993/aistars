@@ -88,7 +88,7 @@ class TextToSpeechTests(StudioTestCase):
         self.say("Good morning, everyone!")
         text = self.last_text()
         self.assertIn("Characters: 23 · Voice: Marin", text)
-        self.assertIn("Price: <b>🪙 1</b>", text)
+        self.assertIn("Price: <b>💎 1</b>", text)
         self.tap("voice:go")
         job = Job.objects.get()
         self.assertEqual((job.kind, job.status, job.prompt),

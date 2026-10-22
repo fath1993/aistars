@@ -134,7 +134,7 @@ class FakeOpenAI:
 
 @configured
 class StudioTestCase(TestCase):
-    """A tester with 🪙 500, OpenAI with a key, Demo mode off: the live path."""
+    """A tester with 💎 500, OpenAI with a key, Demo mode off: the live path."""
 
     demo = False
     credits = 500

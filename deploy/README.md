@@ -162,6 +162,11 @@ visitor ⇄ HTTPS ⇄ Cloudflare ⇄ HTTP ⇄ edge (server-edge, Traefik, :80) �
 - **Pricing:** Runtime settings → **Profit margin (%)** and **Value of one
   Star (USD)**; a model can have its own margin. Price in credits = cost ÷
   Star value × (1 + margin ÷ 100), rounded up, at least 1.
+- **Welcome gift:** Runtime settings → **Credits for a new user** (10; 0:
+  none), given once on registering, once per phone number too.
+- **Credit icon:** Runtime settings → **Credit icon** (💎), before every
+  amount of credits in the bot and the admin. Not ⭐, which is Telegram's
+  Stars.
 - **💼 My finances** (superusers only):
   - **Overview:** any month or all time: money in (Stars paid, less refunds,
     at your Star value), AI costs by provider and by purpose (users' requests

@@ -39,7 +39,7 @@ class AnswerTests(StudioTestCase):
         final = self.last_payload("editMessageText")
         self.assertEqual(final["message_id"], job.message_id)
         self.assertIn("Hello! <b>Here</b> you are.", final["text"])
-        self.assertIn("<i>🪙 1 · GPT-6 Luna · Balance 🪙 499</i>", final["text"])
+        self.assertIn("<i>💎 1 · GPT-6 Luna · Balance 💎 499</i>", final["text"])
         self.assertEqual(self.buttons(final), [f"out:say:{Message.objects.last().pk}",
                                                f"out:cost:{job.pk}", "out:new", "menu:new"])
         self.assertEqual((job.input_tokens, job.output_tokens), (1000, 200))
@@ -200,7 +200,7 @@ class RefusalTests(StudioTestCase):
     def test_not_enough_credits_says_what_it_costs_and_saves_nothing(self):
         self.say("Hi")
         self.assertIn("Not enough credits", self.last_text())
-        self.assertIn("This can cost up to 🪙 1, and your balance is 🪙 0.", self.last_text())
+        self.assertIn("This can cost up to 💎 1, and your balance is 💎 0.", self.last_text())
         self.assertEqual(self.buttons(), ["out:buy", "out:models", "menu:new"])
         self.assertFalse(Job.objects.exists())
         self.assertFalse(Message.objects.exists())
@@ -300,7 +300,7 @@ class ChatScreenTests(StudioTestCase):
     def test_the_chat_screen(self):
         self.tap("chat:")
         self.assertIn("General assistant: helps with anything.", self.last_text())
-        self.assertIn("Model: <b>GPT-6 Luna</b> · An everyday answer: ~🪙 1", self.last_text())
+        self.assertIn("Model: <b>GPT-6 Luna</b> · An everyday answer: ~💎 1", self.last_text())
         self.assertEqual(self.buttons(), ["chat:new", "chat:models", "menu:home", "menu:home"])
         self.say("Hi")
         self.tap("chat:")
@@ -311,7 +311,7 @@ class ChatScreenTests(StudioTestCase):
         self.tap("chat:models")
         text = self.last_text()
         self.assertIn("GPT-6.1 Sol", text)
-        self.assertIn("An everyday answer: ~🪙 1", text)
+        self.assertIn("An everyday answer: ~💎 1", text)
         sol = chat_model("gpt-6.1-sol")
         self.assertIn(f"chat:model:{sol.pk}", self.buttons())
         self.assertEqual(self.tap(f"chat:model:{sol.pk}"), "🤖 GPT-6.1 Sol")
@@ -400,7 +400,7 @@ class ConfirmTests(StudioTestCase):
         self.assertFalse(Job.objects.exists())
         self.assertEqual(self.openai.calls, [], "not even checked before the yes")
         text = self.last_text()
-        self.assertIn("This message can cost up to 🪙", text)
+        self.assertIn("This message can cost up to 💎", text)
         self.assertIn("You pay only what it really costs", text)
         self.assertEqual(self.buttons(), ["out:send", "out:models", "out:cancel"])
         notice = self.last_payload("sendMessage")
@@ -465,11 +465,11 @@ class DailyLimitTests(StudioTestCase):
         Job.objects.update(charged=20)
         self.say("Again")
         self.assertIn("Daily limit reached", self.last_text())
-        self.assertIn("You set a limit of 🪙 20 a day. Today 🪙 20 is spent or held", self.last_text())
+        self.assertIn("You set a limit of 💎 20 a day. Today 💎 20 is spent or held", self.last_text())
         self.assertEqual(self.buttons(), ["out:usage", "menu:new"])
         self.assertEqual(Job.objects.count(), 1)
         self.tap("out:usage", message_id=1)
-        self.assertIn("Daily limit: 🪙 20", self.last_text())
+        self.assertIn("Daily limit: 💎 20", self.last_text())
 
     def test_what_is_held_counts_too(self):
         from apps.studio import usage
@@ -487,7 +487,7 @@ class DetailsTests(StudioTestCase):
         job = Job.objects.get()
         text = self.tap(f"out:cost:{job.pk}", message_id=job.message_id)
         self.assertEqual(text, f"💬 Chat answer #{job.pk}\nGPT-6 Luna\n"
-                               "Held 🪙 1, charged 🪙 1, returned 🪙 0\n"
+                               "Held 💎 1, charged 💎 1, returned 💎 0\n"
                                "Tokens: 1,000 read, 200 written")
         self.assertEqual(self.tg.last("answerCallbackQuery")["show_alert"], "true")
         self.assertNotIn("editMessageText", [m for m, p in self.tg.calls[-1:]])
@@ -518,7 +518,7 @@ class ListenTests(StudioTestCase):
         self.say("Hi")
         answer = Message.objects.get(role="assistant")
         markup = json.loads(self.last_payload("editMessageText")["reply_markup"])
-        self.assertEqual(markup["inline_keyboard"][0][0]["text"], "🔊 Listen · 🪙 1")
+        self.assertEqual(markup["inline_keyboard"][0][0]["text"], "🔊 Listen · 💎 1")
         self.tap(f"out:say:{answer.pk}", message_id=Job.objects.get().message_id)
         speech = Job.objects.get(kind="speech")
         self.assertEqual((speech.status, speech.prompt), (Status.DONE, "Read me aloud."))

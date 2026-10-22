@@ -19,6 +19,7 @@ from .models import (
     PaymentStatus,
     RequestStatus,
 )
+from .pricing import icon
 
 MAX_REQUEST = 100_000
 
@@ -79,7 +80,7 @@ def record_payment(account, successful_payment):
     except IntegrityError:   # the same payment, delivered twice at once
         return Payment.objects.get(telegram_charge_id=charge_id), False
     activity.info(LogCategory.BILLING, "payment",
-                  f"{account} paid ⭐ {stars} for 🪙 {credits}", account=account,
+                  f"{account} paid ⭐ {stars} for {icon()} {credits}", account=account,
                   detail={"charge_id": charge_id, "stars": stars, "credits": credits})
     return payment, True
 
@@ -97,7 +98,7 @@ def refund(payment, by) -> tuple:
             return False, f"{payment}: already refunded."
         balance = ledger.balance(payment.account)
         if balance < payment.credits:
-            return False, (f"{payment}: the user has 🪙 {balance} left of the 🪙 "
+            return False, (f"{payment}: the user has {icon()} {balance} left of the {icon()} "
                            f"{payment.credits} bought, so it cannot be refunded.")
         if not telegram.refund_star_payment(payment.account.telegram_user_id,
                                             payment.telegram_charge_id):
@@ -125,7 +126,7 @@ def has_pending_request(account) -> bool:
 def create_request(account, amount, note) -> CreditRequest:
     request = CreditRequest.objects.create(account=account, amount=amount, note=note[:2000])
     activity.info(LogCategory.BILLING, "credit_request",
-                  f"{account} asked for 🪙 {amount}", account=account)
+                  f"{account} asked for {icon()} {amount}", account=account)
     return request
 
 
@@ -141,7 +142,7 @@ def approve(request, amount, by) -> int:
         request.decided_by, request.decided_at = by, timezone.now()
         request.save()
     activity.info(LogCategory.BILLING, "credit_request_approved",
-                  f"🪙 {amount} granted to {request.account} by {by}",
+                  f"{icon()} {amount} granted to {request.account} by {by}",
                   account=request.account)
     return entry.balance_after
 
@@ -206,3 +207,24 @@ def _settle(job, kind, amount, by):
         if EntryKind.HOLD not in kinds or kinds & {EntryKind.CHARGE, EntryKind.RETURN}:
             return None
         return ledger.post(job.account, kind, amount, job=job, created_by=by)
+
+
+def welcome(account) -> int:
+    """
+    The credits a new user gets on registering (Runtime setting "Credits for a
+    new user"): once per account, and once per phone number, so a second
+    Telegram account on the same number gets none. Returns how many.
+    """
+    from apps.core import runtime
+
+    amount = int(runtime.get("WELCOME_CREDITS"))
+    if amount <= 0:
+        return 0
+    given = LedgerEntry.objects.filter(kind=EntryKind.WELCOME)
+    if given.filter(account=account).exists() or (
+            account.phone and given.filter(account__phone=account.phone).exists()):
+        return 0
+    ledger.post(account, EntryKind.WELCOME, amount, note="welcome credits")
+    activity.info(LogCategory.BILLING, "welcome_credits",
+                  f"{account} got {icon()} {amount} on registering", account=account)
+    return amount
