@@ -17,4 +17,6 @@ dist
 
 # collectstatic output; a bind mount in production.
 static/
+# The owner's invoice files; a bind mount in production.
+media/
 celery-beat-schedule/

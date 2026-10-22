@@ -25,6 +25,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.humanize',
 
     # --- project apps ---
     'apps.core',
@@ -32,6 +33,7 @@ INSTALLED_APPS = [
     'apps.billing',
     'apps.safety',
     'apps.studio',
+    'apps.finance',
 ]
 
 MIDDLEWARE = [
@@ -93,6 +95,11 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'static'
+
+# Uploaded files: only the owner's invoices (My finances). Never served
+# publicly: nginx has no /media/ and Django serves them to superusers only.
+MEDIA_ROOT = os.environ.get("MEDIA_ROOT", str(BASE_DIR / "media"))
+MEDIA_URL = "/media/"
 
 # No user uploads, ever: media lives in Telegram (and its archive channel).
 

@@ -40,10 +40,13 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: aistars.c_settings.prod
       STATIC_ROOT: /app/static
+      MEDIA_ROOT: /app/media
     volumes:
-      # Only collectstatic's output, which nginx serves. There is no media
-      # directory: files live in Telegram (and its archive channel).
+      # collectstatic's output, which nginx serves.
       - /var/www/aistars/static:/app/static
+      # The owner's invoice files (My finances), served by the app to
+      # superusers only, never by nginx. Users' files live in Telegram.
+      - /var/www/aistars/media:/app/media
     env_file:
       - aistars/.env
     networks: [aistars-net]

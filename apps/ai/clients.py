@@ -112,7 +112,15 @@ def _record(model, purpose, cost, message, detail):
     from apps.core.models import LogCategory
     from apps.core.services import budget
 
+    from .models import AICall, Purpose
+
     budget.record_spend(cost)
+    AICall.objects.create(
+        provider=model.provider.kind, model=model.model_id,
+        purpose=purpose if purpose in Purpose.values else Purpose.OTHER,
+        cost_micros=max(int(cost), 0), input_tokens=int(detail.get("input_tokens", 0)),
+        output_tokens=int(detail.get("output_tokens", 0)),
+        cached_tokens=int(detail.get("cached_tokens", 0)), note=message[:200])
     activity.info(LogCategory.AI, purpose, f"{model}: {message}, ${cost / 1e6:.4f}",
                   detail={"model": model.model_id, "cost_micros": cost, **detail})
 
@@ -459,6 +467,39 @@ def list_models(provider) -> list:
         raise _error(response)
     return sorted(str(row.get("id")) for row in _json(response).get("data") or []
                   if row.get("id"))
+
+
+def billed_costs(provider, start, end) -> int:
+    """
+    What OpenAI itself says the organization spent from `start` to `end`
+    (datetimes), in micro-USD, from its Costs API with the Admin key. Raises
+    AIError (no Admin key, or OpenAI refused).
+    """
+    key = provider.admin_key.strip()
+    if provider.kind != ProviderKind.OPENAI or not key:
+        raise AIError(f"{provider} has no Admin key")
+    total, page = 0.0, None
+    for _ in range(12):   # at most a year of daily buckets, 31 a page
+        params = {"start_time": int(start.timestamp()), "end_time": int(end.timestamp()),
+                  "bucket_width": "1d", "limit": 31}
+        if page:
+            params["page"] = page
+        try:
+            response = requests.get(f"{provider.endpoint}/v1/organization/costs",
+                                    headers={"Authorization": f"Bearer {key}"},
+                                    params=params, timeout=TIMEOUT)
+        except requests.RequestException as exc:
+            raise AIError(f"could not reach the provider: {type(exc).__name__}") from exc
+        if response.status_code != 200:
+            raise _error(response)
+        body = _json(response)
+        for bucket in body.get("data") or []:
+            for result in bucket.get("results") or []:
+                total += float((result.get("amount") or {}).get("value") or 0)
+        page = body.get("next_page")
+        if not page:
+            break
+    return round(total * 1_000_000)
 
 
 def test_provider(provider) -> tuple:

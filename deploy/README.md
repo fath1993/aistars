@@ -162,6 +162,26 @@ visitor ⇄ HTTPS ⇄ Cloudflare ⇄ HTTP ⇄ edge (server-edge, Traefik, :80) �
 - **Pricing:** Runtime settings → **Profit margin (%)** and **Value of one
   Star (USD)**; a model can have its own margin. Price in credits = cost ÷
   Star value × (1 + margin ÷ 100), rounded up, at least 1.
+- **💼 My finances** (superusers only):
+  - **Overview:** any month or all time: money in (Stars paid, less refunds,
+    at your Star value), AI costs by provider and by purpose (users' requests
+    versus the bot's own work: safety judge, translations, chat memory and
+    titles, Find for me), the bills, profit and margin, in USD and in EUR
+    (**One EUR in USD**, Runtime settings), the credits users still hold and
+    what they can still cost, day by day, and a CSV for the accountant.
+  - **What is left at OpenAI / Anthropic:** add every payment to a provider
+    as a bill with that payee (start with the balance you have now); the
+    page shows paid minus what the bot used since. Below **Warn me below
+    (USD) at an AI provider** (10) you get a Telegram message, once a day.
+    With an OpenAI **Admin key** (AI → Providers → OpenAI), OpenAI's own
+    figure is shown next to the bot's.
+  - **Bills & invoices:** server, domain, anything else, in USD or EUR, with
+    the invoice file (kept in `/var/www/aistars/media`, opened by
+    superusers only, never served by nginx). **Repeats monthly** adds an
+    unpaid copy every month, ready for its invoice.
+  - **Telegram Stars:** the bot's balance and transactions, read from
+    Telegram. Withdraw in @BotFather → your bot → Balance.
+  - **AI → AI calls:** every call, its purpose and cost.
 - **Support:** Runtime settings → **Support contact**, shown by `/support` and
   `/paysupport` (Telegram requires the latter for bots that take Stars).
 

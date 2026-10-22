@@ -19,7 +19,7 @@ RUN useradd -u 1000 -g 33 ubuntu || true
 
 COPY --chown=ubuntu:www-data . /app/
 
-RUN mkdir -p /app/static && chown -R ubuntu:www-data /app/static
+RUN mkdir -p /app/static /app/media && chown -R ubuntu:www-data /app/static /app/media
 
 USER ubuntu
 

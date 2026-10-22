@@ -1,0 +1,41 @@
+{% extends "admin/base_site.html" %}
+{% load humanize %}
+{% block title %}Telegram Stars{% endblock %}
+
+{% block content %}
+
+<div style="margin:1rem 0 1.5rem;padding:1rem;border-radius:6px;background:var(--darkened-bg);">
+  {% if stars is not None %}
+    <div>The bot's balance, as Telegram counts it:</div>
+    <div style="font-size:1.6rem;font-weight:600;margin:.25rem 0;">⭐ {{ stars|intcomma }}</div>
+    <div class="help">≈ ${{ stars_usd|floatformat:2 }} at ${{ star_value }} a Star.</div>
+  {% else %}
+    <strong>Telegram did not answer.</strong> Check the bot token (Control panel → System
+    status).
+  {% endif %}
+</div>
+
+<p>To withdraw: in Telegram, open @BotFather → your bot → <strong>Balance</strong>. Telegram
+  pays out through Fragment, and Stars become withdrawable only some days after a payment.</p>
+
+<p><a href="{% url 'admin:finance_overview_changelist' %}">‹ My finances overview</a></p>
+
+<h2>The latest transactions</h2>
+<table style="width:100%;border-collapse:collapse;">
+  <tr><th style="text-align:left;padding:.4rem .75rem;">When</th>
+      <th style="text-align:left;padding:.4rem .75rem;">What</th>
+      <th style="text-align:right;padding:.4rem .75rem;">Stars</th>
+      <th style="text-align:right;padding:.4rem .75rem;">USD</th></tr>
+  {% for row in rows %}
+    <tr style="border-bottom:1px solid var(--hairline-color);">
+      <td style="padding:.4rem .75rem;">{{ row.date }}</td>
+      <td style="padding:.4rem .75rem;">{{ row.what }}</td>
+      <td style="padding:.4rem .75rem;text-align:right;color:{% if row.incoming %}#2e7d32{% else %}#c62828{% endif %};">
+        {% if row.incoming %}+{% endif %}{{ row.stars|intcomma }}</td>
+      <td style="padding:.4rem .75rem;text-align:right;">${{ row.usd|floatformat:2 }}</td>
+    </tr>
+  {% empty %}
+    <tr><td colspan="4" style="padding:.4rem .75rem;">No transactions yet.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

@@ -82,6 +82,13 @@ REGISTRY = (
     Spec("STAR_VALUE_USD", "billing", "Value of one Star (USD)", kind="float",
          default=0.013,
          help="What you receive per Telegram Star. One credit is one Star."),
+    Spec("FINANCE_EUR_RATE", "billing", "One EUR in USD", kind="float", default=1.15,
+         help="My finances counts in USD; bills in EUR are converted at this rate, and totals "
+              "are also shown in EUR. Update it now and then."),
+    Spec("PROVIDER_LOW_BALANCE_USD", "billing", "Warn me below (USD) at an AI provider",
+         kind="float", default=10,
+         help="When what you paid an AI provider (My finances → Bills) minus what the bot used "
+              "there falls below this, you get a Telegram message, once a day. 0: never."),
 
     # ---- AI tools --------------------------------------------------------
     Spec("ARCHIVE_CHAT_ID", "studio", "Archive channel", kind="int", default="",
@@ -207,6 +214,15 @@ def validate(key: str, value: str) -> str:
         low, high = RANGES[key]
         if not value.isdigit() or not low <= int(value) <= high:
             return f"A whole number from {low} to {high}."
+    if key in ("FINANCE_EUR_RATE", "PROVIDER_LOW_BALANCE_USD"):
+        try:
+            number = float(value)
+        except ValueError:
+            return "A number, e.g. 1.15 or 10."
+        if key == "FINANCE_EUR_RATE" and not 0.1 <= number <= 10:
+            return "Between 0.1 and 10."
+        if key == "PROVIDER_LOW_BALANCE_USD" and not 0 <= number <= 100_000:
+            return "Between 0 and 100000."
     if key in ("PROFIT_MARGIN_PERCENT", "STAR_VALUE_USD"):
         try:
             number = float(value)

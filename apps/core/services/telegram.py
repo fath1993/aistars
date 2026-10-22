@@ -260,6 +260,17 @@ def answer_pre_checkout_query(query_id, ok=True, error_message=""):
     return _call("answerPreCheckoutQuery", **payload)
 
 
+def star_balance():
+    """The bot's Stars, as Telegram counts them: {"amount", "nanostar_amount"}, or None."""
+    return _call("getMyStarBalance")
+
+
+def star_transactions(offset=0, limit=100):
+    """The bot's Stars transactions, newest first: a list, or None."""
+    result = _call("getStarTransactions", offset=offset, limit=limit)
+    return (result or {}).get("transactions") if isinstance(result, dict) else None
+
+
 def refund_star_payment(user_id, telegram_charge_id):
     return _call("refundStarPayment", user_id=user_id,
                  telegram_payment_charge_id=telegram_charge_id)

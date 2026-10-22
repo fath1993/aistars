@@ -92,6 +92,15 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.core.tasks.purge_telegram_updates',
         'schedule': crontab(hour=4, minute=40),
     },
+    # My finances: little left at an AI provider; this month's repeating bills.
+    'warn_low_balances': {
+        'task': 'apps.finance.tasks.warn_low_balances',
+        'schedule': crontab(minute=15),
+    },
+    'repeat_monthly_bills': {
+        'task': 'apps.finance.tasks.repeat_monthly_bills',
+        'schedule': crontab(hour=5, minute=10),
+    },
     'purge_spend_ledger': {
         'task': 'apps.core.tasks.purge_spend_ledger',
         'schedule': crontab(hour=4, minute=0, day_of_week=0),

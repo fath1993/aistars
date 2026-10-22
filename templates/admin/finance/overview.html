@@ -1,0 +1,166 @@
+{% extends "admin/base_site.html" %}
+{% load humanize %}
+{% block title %}My finances{% endblock %}
+
+{% block extrastyle %}{{ block.super }}
+<style>
+  .fin-cards { display:flex; flex-wrap:wrap; gap:1rem; margin:1rem 0 1.5rem; }
+  .fin-card { flex:1 1 12rem; padding:1rem; border-radius:6px; background:var(--darkened-bg); }
+  .fin-card .big { font-size:1.6rem; font-weight:600; margin:.25rem 0; }
+  .fin-card .small { color:var(--body-quiet-color); font-size:.85rem; }
+  .fin-good { color:#2e7d32; } .fin-bad { color:#c62828; }
+  .fin table { width:100%; border-collapse:collapse; margin-bottom:1.5rem; }
+  .fin td, .fin th { padding:.4rem .75rem; text-align:left; border-bottom:1px solid var(--hairline-color); }
+  .fin td.num, .fin th.num { text-align:right; white-space:nowrap; }
+  .fin-months a { margin-right:.6rem; }
+  .fin-months a.on { font-weight:700; text-decoration:underline; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fin">
+
+<p class="fin-months">
+  {% for value, name in months %}
+    <a href="?month={{ value }}" class="{% if chosen == value %}on{% endif %}">{{ name }}</a>
+  {% endfor %}
+  <a href="?month=all" class="{% if chosen == 'all' %}on{% endif %}">All time</a>
+  · <a href="?month={{ chosen }}&amp;format=csv">⬇ Download as a spreadsheet (CSV)</a>
+</p>
+<p>
+  <a href="{% url 'admin:finance_bill_add' %}">+ Add a bill or a provider payment</a> ·
+  <a href="{% url 'admin:finance_bill_changelist' %}">Bills &amp; invoices</a> ·
+  <a href="{% url 'admin:finance_starsaccount_changelist' %}">Telegram Stars</a> ·
+  <a href="{% url 'admin:ai_aicall_changelist' %}">AI calls, one by one</a>
+</p>
+
+<div class="fin-cards">
+  <div class="fin-card">
+    <div class="small">Money in</div>
+    <div class="big">${{ data.income.net|floatformat:2 }}</div>
+    <div class="small">€{{ eur.net|floatformat:2 }} · {{ data.income.payments }} payment(s) from
+      {{ data.income.buyers }} buyer(s)</div>
+  </div>
+  <div class="fin-card">
+    <div class="small">Money out</div>
+    <div class="big">${{ data.costs|floatformat:2 }}</div>
+    <div class="small">€{{ eur.costs|floatformat:2 }} · AI ${{ data.ai.total|floatformat:2 }},
+      bills ${{ data.other|floatformat:2 }}</div>
+  </div>
+  <div class="fin-card">
+    <div class="small">Profit</div>
+    <div class="big {% if data.profit >= 0 %}fin-good{% else %}fin-bad{% endif %}">
+      ${{ data.profit|floatformat:2 }}</div>
+    <div class="small">€{{ eur.profit|floatformat:2 }}{% if data.margin is not None %} ·
+      {{ data.margin|floatformat:0 }}% of what came in{% endif %}</div>
+  </div>
+  <div class="fin-card">
+    <div class="small">Credits users still hold</div>
+    <div class="big">🪙 {{ held.credits|intcomma }}</div>
+    <div class="small">Worth ${{ held.paid|floatformat:2 }} at your Star value; using them all
+      would cost you at most ${{ held.cost_at_most|floatformat:2 }} at the providers.</div>
+  </div>
+</div>
+
+<h2>What is left at the AI providers</h2>
+{% if balances %}
+  <table>
+    <tr><th>Provider</th><th class="num">Paid since</th><th class="num">Paid</th>
+        <th class="num">Used by the bot</th><th class="num">Left (estimated)</th></tr>
+    {% for row in balances %}
+      <tr>
+        <td><strong>{{ row.name }}</strong></td>
+        <td class="num">{{ row.since }}</td>
+        <td class="num">${{ row.paid|floatformat:2 }}</td>
+        <td class="num">${{ row.used|floatformat:2 }}</td>
+        <td class="num {% if row.low %}fin-bad{% else %}fin-good{% endif %}">
+          <strong>${{ row.left|floatformat:2 }}</strong>{% if row.low %} — top up soon{% endif %}</td>
+      </tr>
+    {% endfor %}
+  </table>
+  <p class="help">Estimated from the bot's own records of every call. Other use of the same API
+    key (another app, the playground) is not in it. You get a Telegram message when it falls
+    below the limit in Runtime settings → Warn me below.</p>
+{% else %}
+  <p>Add what you paid OpenAI (and Anthropic, if you use it) as a bill with that payee:
+    a top-up, or your current balance as a first entry. Then this shows what is left.</p>
+{% endif %}
+
+<h2>Money in</h2>
+<table>
+  <tr><td>Stars paid</td><td class="num">⭐ {{ data.income.stars|intcomma }}</td>
+      <td class="num">${{ data.income.gross|floatformat:2 }}</td></tr>
+  <tr><td>Refunded ({{ data.income.refunds }})</td>
+      <td class="num">⭐ {{ data.income.refunded_stars|intcomma }}</td>
+      <td class="num">−${{ data.income.refunded|floatformat:2 }}</td></tr>
+  <tr><th>Net</th><th></th><th class="num">${{ data.income.net|floatformat:2 }}</th></tr>
+</table>
+<p class="help">At ${{ star_value }} a Star (Runtime settings → Value of one Star). Telegram
+  pays Stars out through Fragment after a waiting period: see Telegram Stars.</p>
+
+<h2>AI costs</h2>
+<table>
+  <tr><th>By provider</th><th class="num">Calls</th><th class="num">Cost</th></tr>
+  {% for row in data.ai.by_provider %}
+    <tr><td>{{ row.name }}</td><td class="num">{{ row.calls|intcomma }}</td>
+        <td class="num">${{ row.usd|floatformat:4 }}</td></tr>
+  {% empty %}<tr><td colspan="3">No AI calls in this period.</td></tr>{% endfor %}
+  {% if data.ai.earlier %}
+    <tr><td>Before calls were recorded one by one (totals only)</td><td></td>
+        <td class="num">${{ data.ai.earlier|floatformat:4 }}</td></tr>
+  {% endif %}
+  {% if openai_billed is not None %}
+    <tr><td><em>OpenAI's own figure for this period (Costs API)</em></td><td></td>
+        <td class="num"><em>${{ openai_billed|floatformat:4 }}</em></td></tr>
+  {% elif openai_billed_error %}
+    <tr><td colspan="3" class="help">OpenAI's own figure could not be read: {{ openai_billed_error }}</td></tr>
+  {% endif %}
+</table>
+
+<table>
+  <tr><th>Users' requests (charged to them in credits)</th><th class="num">Calls</th>
+      <th class="num">Cost</th></tr>
+  {% for row in data.ai.users %}
+    <tr><td>{{ row.name }}</td><td class="num">{{ row.calls|intcomma }}</td>
+        <td class="num">${{ row.usd|floatformat:4 }}</td></tr>
+  {% empty %}<tr><td colspan="3">None.</td></tr>{% endfor %}
+  <tr><th>The bot's own work (you pay it)</th><th></th><th></th></tr>
+  {% for row in data.ai.own %}
+    <tr><td>{{ row.name }}</td><td class="num">{{ row.calls|intcomma }}</td>
+        <td class="num">${{ row.usd|floatformat:4 }}</td></tr>
+  {% empty %}<tr><td colspan="3">None.</td></tr>{% endfor %}
+</table>
+<p class="help">OpenAI Moderation is free and not counted. Costs are priced from what the
+  provider reported for each call and the prices in AI → Models.</p>
+
+<h2>Bills</h2>
+<table>
+  <tr><th>Date</th><th>Payee</th><th>What</th><th class="num">Amount</th><th class="num">USD</th>
+      <th>Paid</th></tr>
+  {% for bill in data.bills %}
+    <tr><td>{{ bill.date }}</td><td>{{ bill.get_payee_display }}</td>
+        <td><a href="{% url 'admin:finance_bill_change' bill.pk %}">{{ bill.description|default:"—" }}</a></td>
+        <td class="num">{{ bill.amount }} {{ bill.currency }}</td>
+        <td class="num">{% if bill.currency == "EUR" %}≈{% endif %}{{ bill.usd|default:"" }}</td>
+        <td>{% if bill.paid %}✓{% else %}<strong class="fin-bad">not yet</strong>{% endif %}</td></tr>
+  {% empty %}<tr><td colspan="6">No bills in this period. Payments to OpenAI and Anthropic are
+    under "What is left at the AI providers", not here.</td></tr>{% endfor %}
+</table>
+<p class="help">EUR at {{ eur_rate }} USD (Runtime settings → One EUR in USD).</p>
+
+{% if days %}
+<h2>Day by day</h2>
+<table>
+  <tr><th>Day</th><th class="num">In</th><th class="num">Refunded</th><th class="num">AI</th>
+      <th class="num">AI calls</th><th class="num">Result</th></tr>
+  {% for day in days %}
+    <tr><td>{{ day.day }}</td><td class="num">${{ day.income|floatformat:2 }}</td>
+        <td class="num">{% if day.refunded %}−${{ day.refunded|floatformat:2 }}{% endif %}</td>
+        <td class="num">${{ day.ai|floatformat:4 }}</td><td class="num">{{ day.calls }}</td>
+        <td class="num {% if day.result >= 0 %}fin-good{% else %}fin-bad{% endif %}">
+          ${{ day.result|floatformat:2 }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+</div>
+{% endblock %}

@@ -110,11 +110,12 @@ class TestSuiteIntegrityTests(SimpleTestCase):
         import apps.ai.tests
         import apps.billing.tests
         import apps.core.tests
+        import apps.finance.tests
         import apps.safety.tests
         import apps.studio.tests
 
         for package in (apps.core.tests, apps.ai.tests, apps.billing.tests,
-                        apps.safety.tests, apps.studio.tests):
+                        apps.safety.tests, apps.studio.tests, apps.finance.tests):
             for info in pkgutil.iter_modules(package.__path__):
                 if info.name.startswith("test_"):
                     yield importlib.import_module(f"{package.__name__}.{info.name}")
@@ -131,7 +132,7 @@ class TestSuiteIntegrityTests(SimpleTestCase):
 
     # Raise it as tests are added; lower it only when a feature is removed
     # together with its tests.
-    MINIMUM_TESTS = 605
+    MINIMUM_TESTS = 620
 
     def test_the_suite_is_not_shrinking(self):
         import unittest

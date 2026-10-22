@@ -37,7 +37,7 @@ touches one, update it in the same change.
 3. **Containers.** Docker Compose with a pinned project name and its own network. The database and Redis publish no ports. Admin-only tools (pgAdmin) bind to 127.0.0.1.
 4. **HTTPS.** Cloudflare does HTTPS for every domain: a proxied DNS record, SSL mode Flexible. Cloudflare to the server is plain HTTP, permanently. There are no certificates on the server and nothing listens on port 443.
 5. **Edge.** The server runs one edge proxy, the `server-edge` repo (Traefik), on port 80. It routes each domain to the project that claims it and passes Cloudflare's `X-Forwarded-For` and `X-Forwarded-Proto` through. No project edits the host nginx.
-6. **Project nginx.** Each web project has its own nginx container, configured in `deploy/nginx/` in its repo. It serves static files read-only from `/var/www/<project>/static` and public media read-only from the project's media folder, and proxies the rest to the app, passing `X-Forwarded-Proto $http_x_forwarded_proto`, never `$scheme`. It looks the app up by name at every request (`resolver 127.0.0.11` and a variable in `proxy_pass`), never once at start. Files the app serves itself (WhiteNoise static, media only admins may see) stay with the app.
+6. **Project nginx.** Each web project has its own nginx container, configured in `deploy/nginx/` in its repo. It serves static files read-only from `/var/www/<project>/static` and public media read-only from the project's media folder, and proxies the rest to the app, passing `X-Forwarded-Proto $http_x_forwarded_proto`, never `$scheme`. It looks the app up by name at every request (`resolver 127.0.0.11` and a variable in `proxy_pass`), never once at start. Files the app serves itself (WhiteNoise static, media only admins may see, e.g. invoices in `/var/www/<project>/media`) stay with the app, which checks who asks.
 7. **Routing.** The project nginx carries the edge labels: `traefik.enable=true`, `traefik.docker.network=<project network>`, `Host(<domain>)`, entry point `web`, port 80. The domain equals `ALLOWED_HOSTS` in `.env`, checked by a test. A new domain needs only a proxied Cloudflare DNS record.
 8. **Deploy script (`dp.sh`).** Runs as root. Deploys a given commit, refused unless it is on `main`, or the latest `main`. Rebuilds the containers (the app migrates on start) and recreates the project nginx (a running nginx keeps the config and folders it started with), fixes ownership and permissions, waits for migrations, runs `doctor --strict`, and exits non-zero if it fails. A project without a database waits for the app to answer instead of for migrations.
 9. **CI/CD.** `.github/workflows/deploy.yml`: on every push to `main`, the tests and (Django) the missing-migration check, then a deploy of that exact commit over SSH. One deploy at a time; **Run workflow** redeploys.
@@ -49,6 +49,49 @@ touches one, update it in the same change.
 15. **Firewall.** The server sits behind a Hetzner Cloud Firewall (`FIREWALL.md` in `server-edge`): SSH (22) open, HTTP (80) only from Cloudflare's IP ranges, everything else closed, so the server's IP answers nothing on its own. A project never needs a firewall change.
 
 ## Changelog
+
+### 2026-10-22 — v0.7.0 — My finances: money in, costs, providers, invoices
+
+The owner could not see easily what the bot costs: as the one who pays for
+everything, he wants one section of his own to manage billing, payments and
+invoices. The plan sent (an overview, provider balances, Telegram Stars,
+bills with invoices, AI calls recorded one by one) was confirmed ("perfect");
+the two choices left to me: USD with EUR at a rate he sets, and invoice files
+on the server, private.
+
+**Every AI call is recorded** (`ai.AICall`, written where every call is
+priced): provider, model, purpose (chat answers, images, voice to text, text
+to speech; safety judge, translations, chat memory, chat titles, Find for me,
+drafted agents; other), cost and tokens. Until now only hourly totals were
+kept (SpendLedger), so earlier months show those as "before calls were
+recorded one by one". AI → AI calls lists them (superusers).
+
+**💼 My finances** (new app `finance`, superusers only):
+- **Overview** for any month or all time: money in (Stars paid less refunds,
+  at the Star value, payments and buyers), money out (AI by provider and by
+  purpose, split into users' requests and the bot's own work; bills), profit
+  and margin, also in EUR; credits users still hold, worth so much and able
+  to cost at most so much at the providers; day by day; a CSV for the
+  accountant (payments, refunds, AI cost per day and provider, bills).
+- **What is left at the providers:** payments to OpenAI or Anthropic are
+  bills with that payee; paid minus what the bot used since the first one is
+  the estimated balance, red below **Warn me below (USD) at an AI provider**
+  (10), and the owner gets a Telegram message once a day (hourly check).
+  With an optional OpenAI **Admin key** (AI → Providers), OpenAI's own Costs
+  API figure is shown next to the bot's.
+- **Bills & invoices:** date, payee (OpenAI, Anthropic, server, domain,
+  other), amount in USD or EUR (**One EUR in USD**, 1.15), invoice number and
+  file, paid, **Repeats monthly** (an unpaid copy each month, daily task).
+  Payments to AI providers count toward the balance there, not as costs: the
+  AI is counted call by call.
+- **Telegram Stars:** the bot's balance and its last 100 transactions
+  (payments, refunds, withdrawals) from Telegram (getMyStarBalance,
+  getStarTransactions).
+- **Invoice files** live in `/var/www/aistars/media` (a new bind mount,
+  `MEDIA_ROOT`), opened through the admin by superusers only; nginx has no
+  /media/. Deployment standard item 6 says so.
+
+Tests on SQLite and, for the new queries, on Postgres. 620 tests.
 
 ### 2026-10-22 — v0.6.0 — Find and pick the archive channel in the admin
 

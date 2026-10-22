@@ -19,6 +19,9 @@ class Provider(models.Model):
 
     kind = models.CharField(max_length=16, choices=ProviderKind.choices, unique=True)
     api_key = models.TextField(blank=True, help_text="Kept here, never shown again in full.")
+    admin_key = models.TextField(
+        blank=True, help_text="Optional, OpenAI only: an Admin key, read-only use, so My "
+                              "finances can show OpenAI's own cost figures next to the bot's.")
     base_url = models.URLField(blank=True,
                                help_text="Leave empty for the provider's own API address.")
     enabled = models.BooleanField(default=True)
@@ -219,3 +222,49 @@ class AIModel(models.Model):
         offered = cls.offered_for(use, demo)
         return next((model for model in offered if model.is_default), None) or (
             offered[0] if offered else None)
+
+
+class Purpose(models.TextChoices):
+    """What an AI call was for: a user's request, or the bot's own work."""
+
+    CHAT = "chat", "Chat answers"
+    IMAGE = "image", "Images"
+    TRANSCRIPTION = "transcription", "Voice to text"
+    SPEECH = "speech", "Text to speech"
+    SAFETY_JUDGE = "safety_judge", "Safety judge"
+    TRANSLATION = "translation", "Translations"
+    CHAT_MEMORY = "chat_memory", "Chat memory"
+    CHAT_TITLE = "chat_title", "Chat titles"
+    FIND_AGENTS = "find_agents", "Find for me"
+    DRAFT_AGENTS = "draft_agents", "Drafted agents"
+    OTHER = "other", "Other"
+
+
+# Paid for by users (held and charged in credits); the rest is the bot's own
+# work, which the owner pays.
+USER_PURPOSES = (Purpose.CHAT, Purpose.IMAGE, Purpose.TRANSCRIPTION, Purpose.SPEECH)
+
+
+class AICall(models.Model):
+    """
+    One call to an AI provider and what it cost, as the bot priced it from the
+    provider's report: the owner's costs, call by call (My finances). Kept.
+    """
+
+    at = models.DateTimeField(auto_now_add=True, db_index=True)
+    provider = models.CharField(max_length=16, choices=ProviderKind.choices, db_index=True)
+    model = models.CharField(max_length=128)
+    purpose = models.CharField(max_length=24, choices=Purpose.choices, db_index=True)
+    cost_micros = models.BigIntegerField(default=0, help_text="USD × 1,000,000.")
+    input_tokens = models.PositiveIntegerField(default=0)
+    output_tokens = models.PositiveIntegerField(default=0)
+    cached_tokens = models.PositiveIntegerField(default=0)
+    note = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ("-at",)
+        indexes = [models.Index(fields=["provider", "at"])]
+        verbose_name = "AI call"
+
+    def __str__(self):
+        return f"{self.at:%Y-%m-%d %H:%M} {self.provider} {self.purpose} ${self.cost_micros / 1e6:.4f}"

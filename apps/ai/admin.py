@@ -2,7 +2,7 @@ from django import forms
 from django.contrib import admin, messages
 
 from . import clients, sync
-from .models import AIModel, Provider
+from .models import AICall, AIModel, Provider
 
 
 class ProviderForm(forms.ModelForm):
@@ -10,14 +10,23 @@ class ProviderForm(forms.ModelForm):
     api_key = forms.CharField(
         required=False, widget=forms.PasswordInput(render_value=False),
         help_text="Paste a new key to replace the saved one. Empty keeps it.")
+    admin_key = forms.CharField(
+        required=False, widget=forms.PasswordInput(render_value=False),
+        help_text="Optional, OpenAI only: an Admin key (platform.openai.com → Settings → "
+                  "Admin keys), so My finances shows OpenAI's own cost figures. Empty keeps "
+                  "the saved one.")
 
     class Meta:
         model = Provider
-        fields = ("kind", "api_key", "base_url", "enabled")
+        fields = ("kind", "api_key", "admin_key", "base_url", "enabled")
 
     def clean_api_key(self):
         key = self.cleaned_data["api_key"].strip()
         return key or (self.instance.api_key if self.instance.pk else "")
+
+    def clean_admin_key(self):
+        key = self.cleaned_data["admin_key"].strip()
+        return key or (self.instance.admin_key if self.instance.pk else "")
 
 
 class ModelInline(admin.TabularInline):
@@ -105,3 +114,34 @@ class AIModelAdmin(admin.ModelAdmin):
     @admin.display(description="users can have it", boolean=True)
     def ready_for_users(self, obj):
         return obj.ready
+
+
+@admin.register(AICall)
+class AICallAdmin(admin.ModelAdmin):
+    """Every call to a provider and what it cost: the owner's AI costs, call by call."""
+
+    list_display = ("at", "provider", "model", "purpose", "cost_usd", "input_tokens",
+                    "cached_tokens", "output_tokens")
+    list_filter = ("provider", "purpose", "at")
+    search_fields = ("model", "note")
+    show_full_result_count = False
+    readonly_fields = [field.name for field in AICall._meta.fields]
+
+    @admin.display(description="cost (USD)", ordering="cost_micros")
+    def cost_usd(self, obj):
+        return f"{obj.cost_micros / 1e6:.4f}"
+
+    def has_module_permission(self, request):
+        return request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
