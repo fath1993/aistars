@@ -228,10 +228,15 @@ visitor ⇄ HTTPS ⇄ Cloudflare ⇄ HTTP ⇄ edge (server-edge, Traefik, :80) �
 - **🎙 Voice:** a voice note in a chat is turned into text and answered;
   **Voice to text** gives the text back; **Text to speech** reads a text aloud
   in the voice the user chose.
-- **Archive channel:** set **Your Telegram ID**, then, from that account,
-  make the bot an admin of a private channel that it may post in. It is
-  recorded by itself (Runtime settings → Archive channel). Every photo and
-  voice note sent in, and every image and voice note made, is copied there.
+- **Archive channel:** Control panel → **Archive channel**. Make the bot an
+  admin of a private channel with **Post messages**, post anything there,
+  reload the page: the channel is listed with its ID; press **Use as
+  archive** (the bot posts a line there to be sure it may). A channel's ID or
+  public @username can be typed instead. If the page says Telegram does not
+  send channel posts, press its **Register the Telegram webhook** once. It
+  is also recorded by itself when the account in **Your Telegram ID** makes
+  the bot an admin. Every photo and voice note sent in, and every image and
+  voice note made, is copied there; nothing is ever deleted from it.
 - **Requests:** AI tools → **Requests**: each one's hold, cost and charge.
   **Fail and return the credits** ends one that is stuck; a sweep every five
   minutes does it by itself after 20 minutes.

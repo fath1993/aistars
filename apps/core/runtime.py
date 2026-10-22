@@ -85,8 +85,8 @@ REGISTRY = (
 
     # ---- AI tools --------------------------------------------------------
     Spec("ARCHIVE_CHAT_ID", "studio", "Archive channel", kind="int", default="",
-         help="Filled in by itself: make the bot an admin of a private channel, from your "
-              "own Telegram account (Your Telegram ID must be set). Every photo and voice "
+         help="Set it on Control panel → Archive channel: make the bot an admin of a private "
+              "channel, post anything there, and pick it. Every photo and voice "
               "note sent in, and every image and voice note made, is copied there. "
               "Empty: nothing is archived."),
     Spec("CHAT_MEMORY_TOKENS", "studio", "Chat memory, word for word (tokens)", kind="int",

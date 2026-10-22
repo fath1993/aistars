@@ -50,6 +50,31 @@ touches one, update it in the same change.
 
 ## Changelog
 
+### 2026-10-22 — v0.6.0 — Find and pick the archive channel in the admin
+
+The owner made the bot an admin of a private channel and posted in it, and
+nothing happened: the archive channel was never recorded, and there was no
+way to get the channel's ID from the admin. Telegram did not send the bot
+the posts (`channel_post` was not among the updates asked for), and the
+"made admin" notice is used only when it comes from Your Telegram ID.
+- Telegram is asked for `channel_post` too. Nothing is done with a post; it
+  is kept like every update (Telegram updates).
+- **Control panel → Archive channel** (`/admin/core/controlpanel/archive/`):
+  the current archive with its title and **Stop archiving**; the steps
+  (make the bot an admin with Post messages, post anything, reload); every
+  channel the bot heard from in 30 days, from posts and from being made admin
+  by anyone, with its ID, when, and the bot's status, each with **Use as
+  archive**; and a box for a channel ID or public @username. Using one checks
+  the channel with Telegram and has the bot post "✅ This channel is now the
+  AIstars archive." there; only then is it saved, so a channel the bot may not
+  post in is refused with the reason.
+- While Telegram is not sending channel posts (the webhook was registered
+  before this version), the page says so with a **Register the Telegram
+  webhook** button, and the doctor warns.
+- Runtime settings, the doctor's fix and deploy/README point to the page.
+- Tests for the page, picking, refusals, typing an ID or @username, stopping,
+  the webhook warning.
+
 ### 2026-10-22 — v0.5.0 — Keep every Telegram update, and handle each once
 
 The owner wants the warehouse bot's Telegram updates section here too: there

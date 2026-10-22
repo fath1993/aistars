@@ -5,13 +5,20 @@ note sent in, and every image and voice note made, is copied, captioned
 made, and the files never live on this server. Chat texts are not copied:
 they are kept in the database, with the chat.
 
-The channel is recorded by itself: the owner makes the bot an admin of it.
-Only the owner (Runtime setting "Your Telegram ID") can do that; anyone else
-adding the bot to a channel is ignored.
+Setting it: Control panel → Archive channel lists the channels the bot has
+heard from (it is admin there and something was posted, or it was just made
+admin), and the owner picks one; the bot posts a line there to be sure it
+may. It is also recorded by itself when the owner (Runtime setting "Your
+Telegram ID") makes the bot an admin of a channel; anyone else doing so is
+ignored, and is only listed on that page.
 """
 
+from datetime import timedelta
+
+from django.utils import timezone
+
 from apps.core import activity, runtime
-from apps.core.models import LogCategory, RuntimeSetting
+from apps.core.models import LogCategory, RuntimeSetting, TelegramUpdate
 from apps.core.services import telegram
 
 
@@ -74,6 +81,66 @@ def on_member_update(update):
                        f"nothing is archived now", detail={"chat": chat["id"], "status": status})
         _tell_owner(owner, f"⚠️ The bot is no longer an admin of <b>{title}</b>, so nothing "
                            f"is archived. Make it an admin of a channel again.")
+
+
+# --------------------------------------------------------------------------
+# Choosing it in the admin
+# --------------------------------------------------------------------------
+
+def seen_channels(days=30, limit=20) -> list:
+    """
+    The channels the bot has heard from lately, newest first: [{"id", "title",
+    "seen", "status"}]. From the Telegram updates kept: a post there, or the
+    bot being made admin (or removed).
+    """
+    since = timezone.now() - timedelta(days=days)
+    found = {}
+    rows = TelegramUpdate.objects.filter(
+        kind__in=("channel_post", "my_chat_member"), received_at__gte=since).order_by(
+        "-received_at")[:1000]
+    for row in rows:
+        body = row.payload.get(row.kind) or {}
+        chat = body.get("chat") or {}
+        if chat.get("type") != "channel" or chat.get("id") in found:
+            continue
+        status = ((body.get("new_chat_member") or {}).get("status")
+                  if row.kind == "my_chat_member" else "posting")
+        found[chat["id"]] = {"id": chat["id"], "title": chat.get("title") or "",
+                             "seen": row.received_at, "status": status}
+        if len(found) == limit:
+            break
+    return list(found.values())
+
+
+def connect(reference, by="") -> tuple:
+    """
+    Use a channel (its ID, or @username) as the archive, once the bot has
+    posted a line in it: (ok, what to tell the owner).
+    """
+    reference = str(reference).strip()
+    if not reference:
+        return False, "Type the channel's ID or @username."
+    chat = telegram.get_chat(int(reference) if reference.lstrip("-").isdigit() else reference)
+    if not isinstance(chat, dict) or chat.get("type") != "channel":
+        return False, ("Telegram does not know this channel, or the bot is not in it. Make the "
+                       "bot an admin of the channel, then try again.")
+    title = chat.get("title") or str(chat["id"])
+    sent = telegram.send_message(chat["id"], "✅ This channel is now the AIstars archive.",
+                                 parse_mode=None)
+    if not sent:
+        return False, (f"The bot may not post in “{title}”: make it an admin with the Post "
+                       "messages right, then try again.")
+    _set(chat["id"])
+    activity.info(LogCategory.STUDIO, "archive_set",
+                  f"archive channel set to {chat['id']} ({title}) in the admin by {by}",
+                  detail={"chat": chat["id"]})
+    return True, f"“{title}” ({chat['id']}) is now the archive channel."
+
+
+def disconnect(by=""):
+    _set("")
+    activity.warn(LogCategory.STUDIO, "archive_cleared",
+                  f"archive channel cleared in the admin by {by}: nothing is archived now")
 
 
 def caption(job, role) -> str:

@@ -1,0 +1,92 @@
+{% extends "admin/base_site.html" %}
+{% block title %}Archive channel{% endblock %}
+
+{% block content %}
+<h1>Archive channel</h1>
+
+{% if messages %}
+  <ul class="messagelist">
+    {% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}
+  </ul>
+{% endif %}
+
+<div style="margin:1rem 0 1.5rem 0;padding:1rem;border-radius:6px;
+            background:{% if current %}#dff0d8{% else %}#fcf8e3{% endif %};color:#333;">
+  {% if current %}
+    <strong>Archiving to “{{ current_chat.title|default:"?" }}”</strong>
+    (<code>{{ current }}</code>){% if not current_chat %}: Telegram does not show this
+    channel to the bot any more; pick another below.{% endif %}
+    <form method="post" style="display:inline;margin-left:1rem;">
+      {% csrf_token %}
+      <button type="submit" name="action" value="stop">Stop archiving</button>
+    </form>
+  {% else %}
+    <strong>No archive channel yet.</strong> Photos, files, voice notes and images are
+    not copied anywhere.
+  {% endif %}
+</div>
+
+{% if posts_off %}
+<form method="post" style="margin-bottom:1.5rem;padding:1rem;border-radius:6px;
+                           background:#f2dede;color:#333;">
+  {% csrf_token %}
+  <strong>Telegram does not send the bot the posts in channels yet</strong>, so no channel
+  can show up below. Update the webhook once:
+  <button type="submit" name="action" value="register_webhook" class="default">
+    Register the Telegram webhook
+  </button>
+</form>
+{% endif %}
+
+<h2>How to find your channel</h2>
+<ol>
+  <li>Make the bot an admin of your private channel, with the <strong>Post messages</strong>
+    right.</li>
+  <li>Post anything in the channel, for example “test”.</li>
+  <li>Reload this page: the channel is listed below with its ID. Press
+    <strong>Use as archive</strong>; the bot posts a line there to be sure it may.</li>
+</ol>
+
+<h2>Channels the bot has heard from (30 days)</h2>
+{% if channels %}
+  <table style="width:100%;border-collapse:collapse;">
+    <thead><tr>
+      <th style="text-align:left;padding:.5rem .75rem;">Channel</th>
+      <th style="text-align:left;padding:.5rem .75rem;">ID</th>
+      <th style="text-align:left;padding:.5rem .75rem;">Last heard</th>
+      <th style="text-align:left;padding:.5rem .75rem;">The bot</th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+    {% for channel in channels %}
+      <tr style="border-bottom:1px solid #eee;">
+        <td style="padding:.5rem .75rem;"><strong>{{ channel.title|default:"—" }}</strong></td>
+        <td style="padding:.5rem .75rem;"><code>{{ channel.id }}</code></td>
+        <td style="padding:.5rem .75rem;">{{ channel.seen }}</td>
+        <td style="padding:.5rem .75rem;">{{ channel.status }}</td>
+        <td style="padding:.5rem .75rem;">
+          {% if channel.id == current %}✓ the archive{% else %}
+          <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="chat" value="{{ channel.id }}">
+            <button type="submit" name="action" value="use" class="default">Use as archive</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p>None yet. Follow the steps above, then reload this page.</p>
+{% endif %}
+
+<h2>Or type it</h2>
+<form method="post">
+  {% csrf_token %}
+  <input type="text" name="chat" placeholder="-1001234567890 or @channelname" size="32">
+  <button type="submit" name="action" value="use">Check and use</button>
+  <p class="help">The channel's ID (it starts with -100) or, for a public channel, its
+    @username. The bot must be an admin there with Post messages.</p>
+</form>
+{% endblock %}

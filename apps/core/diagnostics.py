@@ -197,6 +197,10 @@ def _telegram(report, token):
         report.add(WARN, "Payment updates", "Telegram does not send the payment checks",
                    "Press Register the Telegram webhook: until then every Stars payment "
                    "is cancelled after 10 seconds.", section)
+    if allowed is not None and "channel_post" not in allowed:
+        report.add(WARN, "Channel posts", "Telegram does not send posts in channels",
+                   "Press Register the Telegram webhook: until then the Archive channel "
+                   "page cannot list your channel.", section)
     if allowed is not None and "my_chat_member" not in allowed:
         report.add(WARN, "Channel updates", "Telegram does not say when the bot is made a "
                    "channel admin", "Press Register the Telegram webhook: until then the "

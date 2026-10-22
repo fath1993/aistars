@@ -208,7 +208,16 @@ def bot_username() -> str:
 # pre_checkout_query: Telegram asks the bot to confirm every Stars payment
 # before taking it, and cancels the payment if no answer comes in 10 seconds.
 # my_chat_member: the bot was made admin of a channel (the archive channel).
-ALLOWED_UPDATES = ["message", "callback_query", "pre_checkout_query", "my_chat_member"]
+# channel_post: a post in a channel the bot is admin of; nothing is done with
+# it, but it is kept (Telegram updates), so the Archive channel page can list
+# the channels the bot is in.
+ALLOWED_UPDATES = ["message", "callback_query", "pre_checkout_query", "my_chat_member",
+                   "channel_post"]
+
+
+def get_chat(chat_id):
+    """A chat by its ID or @username, or None (unknown, or the bot is not in it)."""
+    return _call("getChat", chat_id=chat_id)
 
 
 def set_webhook(url: str):

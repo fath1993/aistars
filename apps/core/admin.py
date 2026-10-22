@@ -444,7 +444,46 @@ class ControlPanelAdmin(admin.ModelAdmin):
         return [
             path("diagnostics/", self.admin_site.admin_view(self.diagnostics_view),
                  name="core_diagnostics"),
+            path("archive/", self.admin_site.admin_view(self.archive_view),
+                 name="core_archive"),
         ] + super().get_urls()
+
+    def archive_view(self, request):
+        """Find the archive channel's ID: the channels the bot heard from, and a pick."""
+        from django.contrib import messages
+        from django.shortcuts import redirect
+        from django.template.response import TemplateResponse
+
+        from apps.studio import archive
+
+        from . import diagnostics
+        from .services import telegram
+
+        if request.method == "POST":
+            action, by = request.POST.get("action"), request.user.get_username()
+            if action == "use":
+                ok, note = archive.connect(request.POST.get("chat", ""), by=by)
+                (messages.success if ok else messages.error)(request, note)
+            elif action == "stop":
+                archive.disconnect(by=by)
+                messages.warning(request, "Nothing is archived now.")
+            elif action == "register_webhook":
+                ok, note = diagnostics.register_webhook()
+                (messages.success if ok else messages.error)(request, note)
+            return redirect(request.path)
+
+        current = archive.chat_id()
+        info = telegram._call("getWebhookInfo")
+        allowed = info.get("allowed_updates") if isinstance(info, dict) else None
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Archive channel",
+            "current": current,
+            "current_chat": (telegram.get_chat(current) or None) if current else None,
+            "channels": archive.seen_channels(),
+            "posts_off": allowed is not None and "channel_post" not in allowed,
+        }
+        return TemplateResponse(request, "admin/core/archive.html", context)
 
     def diagnostics_view(self, request):
         """The doctor, in the admin: same checks, same fixes, no shell."""

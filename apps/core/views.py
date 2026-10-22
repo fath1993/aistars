@@ -71,6 +71,8 @@ def telegram_webhook(request):
             _handle_pre_checkout(update["pre_checkout_query"])
         elif "my_chat_member" in update:
             archive.on_member_update(update["my_chat_member"])
+        # A channel_post needs nothing: kept above, it shows the channel on the
+        # Archive channel page.
     except Exception as exc:
         # Never 500 back to Telegram; that buys an infinite retry loop.
         logger.exception("webhook handler failed for update %s", update.get("update_id"))

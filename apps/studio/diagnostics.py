@@ -61,8 +61,8 @@ def check(report, section):
         report.add(OK, "Archive channel", str(archive), "", section)
     else:
         report.add(WARN, "Archive channel", "not set: photos, images and voice notes are not "
-                   "archived", "Set Your Telegram ID, then make the bot an admin of a private "
-                   "channel from your own account; it is recorded by itself.", section)
+                   "archived", "Control panel → Archive channel: make the bot an admin of a "
+                   "private channel, post anything there, then pick it.", section)
 
     writer = AIModel.translation_default()
     if panel.demo_mode or (writer is not None and writer.usable):
