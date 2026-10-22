@@ -58,7 +58,7 @@ handled updates and kept nothing, so whether Telegram ever sent the "made
 admin of a channel" notice for the archive could not be seen. Asked how long
 to keep them, the owner left it to me: 90 days, adjustable (the chats,
 payments and requests they made stay regardless).
-- `TelegramUpdate` (Core → Telegram updates, `apps/core/updates.py`): the
+- `TelegramUpdate` (AIstars → Telegram updates, `apps/core/updates.py`): the
   update as it came, its type, the user or chat it came from, a preview (the
   text, the button, "[file: cv.pdf] caption", "shared a phone number", "paid
   250 XTR", "channel “Archive”: left → administrator"), the outcome

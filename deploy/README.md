@@ -211,7 +211,7 @@ visitor ⇄ HTTPS ⇄ Cloudflare ⇄ HTTP ⇄ edge (server-edge, Traefik, :80) �
   from the archive channel. `/privacy` (also Profile → 🔒 Privacy) tells
   users what is kept, that a deleted chat stays with you, and that you can
   read chats.
-- **Telegram updates** (Core → Telegram updates): every update Telegram
+- **Telegram updates** (AIstars → Telegram updates): every update Telegram
   sends, as it came: type, who (linked to the account), a preview, Handled or
   Failed (with the error), how many times Telegram sent it (it is handled
   once), and the raw data. Deliveries with a wrong secret are listed as
